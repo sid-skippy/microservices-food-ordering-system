@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IndiCrave - Food Delivery</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">IndiCrave</div>
+        <div class="nav-links" id="nav-links">
+            </div>
+    </nav>
+
+    <main id="app-container">
+        <section id="auth-section" class="view-section active">
+            <div class="card form-card">
+                <h2>Login to IndiCrave</h2>
+                <input type="email" id="login-email" placeholder="Enter your email">
+                <button onclick="handleLogin()">Login</button>
+                <p style="font-size: 0.9em; color: #666; margin-top: 10px;">
+                    Demo accounts:<br>
+                    Customer: john.doe@example.com<br>
+                    Owner: pizza.palace@restaurant.com<br>
+                    Delivery: delivery.raj@courier.com
+                </p>
+                <hr>
+                <h2>Or Register (Customer)</h2>
+                <input type="text" id="reg-name" placeholder="Full Name*">
+                <input type="email" id="reg-email" placeholder="Email*">
+                <input type="text" id="reg-phone" placeholder="Phone Number*">
+                <button onclick="handleRegister()" class="btn-secondary">Register</button>
+            </div>
+        </section>
+
+        <section id="profile-section" class="view-section">
+            <div class="card form-card">
+                <h2>Your Profile</h2>
+                <p>Please provide your delivery address to proceed.</p>
+                <input type="text" id="prof-street" placeholder="Street Address*">
+                <div style="display: flex; gap: 10px; width: 90%; margin: 0 auto; margin-bottom: 1rem;">
+                    <input type="text" id="prof-city" placeholder="City*" style="width: 33%; margin-bottom: 0;">
+                    <input type="text" id="prof-state" placeholder="State*" style="width: 33%; margin-bottom: 0;">
+                    <input type="text" id="prof-pincode" placeholder="Pincode*" style="width: 33%; margin-bottom: 0;">
+                </div>
+                <button onclick="saveProfile()">Save Profile</button>
+                <button onclick="routeUserByRole()" class="btn-secondary" style="margin-top: 10px;" id="btn-cancel-profile">Cancel</button>
+            </div>
+        </section>
+
+        <section id="restaurants-section" class="view-section">
+            <h2>Available Restaurants</h2>
+            <div class="grid" id="restaurants-grid"></div>
+        </section>
+
+        <section id="menu-section" class="view-section">
+            <button onclick="showView('restaurants-section')" class="btn-back">← Back to Restaurants</button>
+            <h2 id="current-restaurant-name">Menu</h2>
+            <div class="menu-container">
+                <div class="grid" id="menu-grid"></div>
+                <div class="cart-sidebar">
+                    <h3>Your Cart</h3>
+                    <div id="cart-items"></div>
+                    <div class="cart-total">Total: ₹<span id="cart-total-amount">0.00</span></div>
+                    <button onclick="processCheckout()" id="checkout-btn" disabled>Proceed to Pay</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="my-orders-section" class="view-section">
+            <h2>My Past Orders</h2>
+            <div id="my-orders-container" class="grid"></div>
+        </section>
+        
+        <section id="success-section" class="view-section text-center">
+            <h2>🎉 Order Placed Successfully!</h2>
+            <p>Your payment has been recorded.</p>
+            <button onclick="routeUserByRole()" class="btn-secondary">Back to Dashboard</button>
+        </section>
+
+        <section id="owner-section" class="view-section">
+            <h2>Restaurant Owner Dashboard</h2>
+            <div class="card">
+                <h3>Incoming Orders</h3>
+                <div id="owner-orders-container">Loading orders...</div>
+            </div>
+        </section>
+
+        <section id="delivery-section" class="view-section">
+            <h2>Delivery Partner Dashboard</h2>
+            <div class="card">
+                <h3>Active Deliveries</h3>
+                <div id="delivery-orders-container">Loading deliveries...</div>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="review-modal" class="modal" style="display: none;">
+        <div class="modal-content card">
+            <h3 style="margin-top: 0;">Leave a Review</h3>
+            <input type="hidden" id="review-order-id">
+            <input type="hidden" id="review-restaurant-id">
+            <label style="font-weight: bold; display: block; margin-bottom: 5px;">Rating (1-5):</label>
+            <input type="number" id="review-rating" min="1" max="5" value="5">
+            <label style="font-weight: bold; display: block; margin-bottom: 5px;">Comment:</label>
+            <textarea id="review-comment" rows="3" placeholder="Tell us how the food was!"></textarea>
+            <button onclick="submitReview()">Submit Review</button>
+            <button onclick="closeReviewModal()" class="btn-secondary" style="margin-top:10px;">Cancel</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
