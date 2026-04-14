@@ -1,669 +1,1270 @@
-// Service URLs
 const USER_API = "http://localhost:3000";
 const RESTAURANT_API = "http://localhost:3001";
 const ORDER_API = "http://localhost:3002";
 const PAYMENT_API = "http://localhost:3003";
 
-// State
+const PROMO_CODES = {
+    SAVE10: { type: "percent", value: 10, label: "10% off subtotal" },
+    FREEDEL: { type: "delivery", value: 100, label: "Free delivery" }
+};
+
 let currentUser = null;
 let systemRoles = [];
-let currentRestaurantId = null;
-let cart = [];
+let currentRestaurant = null;
 let menuItemsCache = [];
+let cart = [];
+let appliedPromo = null;
+let selectedOwnerRestaurantId = null;
 
-// Initialize
-document.addEventListener('DOMContentLoaded', async () => {
-    await fetchRoles();
-    const savedUser = localStorage.getItem('indicrave_user');
-    if (savedUser) {
-        currentUser = JSON.parse(savedUser);
-        updateNav();
-        routeUserByRole();
+document.addEventListener("DOMContentLoaded", async () => {
+    try {
+        await fetchRoles();
+        await restoreSession();
+        bindEnterToAuthForms();
+    } catch (err) {
+        notify(err.message || "Failed to initialize app");
     }
 });
 
-// --- CORE UTILITIES ---
-async function fetchRoles() {
+function bindEnterToAuthForms() {
+    ["login-email", "login-password"].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) element.addEventListener("keydown", (event) => event.key === "Enter" && handleLogin());
+    });
+
+    ["reg-name", "reg-email", "reg-phone", "reg-password"].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) element.addEventListener("keydown", (event) => event.key === "Enter" && handleRegister());
+    });
+}
+
+async function apiRequest(url, options = {}) {
+    const response = await fetch(url, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options
+    });
+    const text = await response.text();
+    let payload = {};
+
     try {
-        const res = await fetch(`${USER_API}/roles`);
-        systemRoles = await res.json();
+        payload = text ? JSON.parse(text) : {};
     } catch (err) {
-        console.error("Failed to fetch roles. Is Port 3000 running?", err);
+        throw new Error(`Invalid response from ${url}`);
     }
+
+    if (!response.ok || payload.success === false) {
+        throw new Error(payload.error || payload.message || `Request failed: ${response.status}`);
+    }
+
+    return payload;
+}
+
+function notify(message) {
+    alert(message);
 }
 
 function showView(viewId) {
-    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-    document.getElementById(viewId).classList.add('active');
+    document.querySelectorAll(".view-section").forEach((section) => section.classList.remove("active"));
+    document.getElementById(viewId)?.classList.add("active");
+}
+
+function parseDecimal(value) {
+    if (value == null) return 0;
+    if (typeof value === "number") return value;
+    if (typeof value === "string") return parseFloat(value) || 0;
+    if (value.$numberDecimal) return parseFloat(value.$numberDecimal) || 0;
+    return parseFloat(value.toString()) || 0;
+}
+
+function formatCurrency(value) {
+    return `₹${parseDecimal(value).toFixed(2)}`;
+}
+
+function formatDate(value) {
+    return value ? new Date(value).toLocaleString() : "Not available";
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function getRoleName(roleId) {
+    return systemRoles.find((role) => role._id === roleId)?.role_name || "customer";
+}
+
+function renderStats(containerId, stats) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = stats.map((stat) => `
+        <div class="stat-card">
+            <div class="label">${escapeHtml(stat.label)}</div>
+            <div class="value">${escapeHtml(stat.value)}</div>
+        </div>
+    `).join("");
+}
+
+async function fetchRoles() {
+    const payload = await apiRequest(`${USER_API}/roles`);
+    systemRoles = payload.data || [];
+}
+
+async function restoreSession() {
+    const savedUser = localStorage.getItem("indicrave_user");
+    if (!savedUser) {
+        updateNav();
+        showView("auth-section");
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(savedUser);
+        const payload = await apiRequest(`${USER_API}/users/${parsed._id}`);
+        currentUser = payload.data;
+        currentUser.roleName = getRoleName(currentUser.role_id);
+        persistCurrentUser();
+        updateNav();
+        routeUserByRole();
+    } catch (err) {
+        currentUser = null;
+        localStorage.removeItem("indicrave_user");
+        updateNav();
+        showView("auth-section");
+    }
+}
+
+function persistCurrentUser() {
+    if (currentUser) localStorage.setItem("indicrave_user", JSON.stringify(currentUser));
 }
 
 function updateNav() {
-    const navLinks = document.getElementById('nav-links');
-    if (currentUser) {
-        let navHtml = `<span>Welcome, <b>${currentUser.full_name}</b> (${currentUser.roleName})</span>`;
-        if (currentUser.roleName === 'customer') {
-            navHtml += `<button style="width:auto; padding:0.4rem 1rem; margin-left:1rem; background-color:#1976D2;" onclick="loadMyOrders()">My Orders</button>`;
-            navHtml += `<button style="width:auto; padding:0.4rem 1rem; margin-left:0.5rem; background-color:#333;" onclick="loadProfile()">Profile</button>`;
-            navHtml += `<button style="width:auto; padding:0.4rem 1rem; margin-left:0.5rem;" onclick="loadRestaurants()">Home</button>`;
-        }
-        navHtml += `<button style="width:auto; padding:0.4rem 1rem; margin-left:0.5rem;" onclick="logout()">Logout</button>`;
-        navLinks.innerHTML = navHtml;
-    } else {
-        navLinks.innerHTML = ``;
-    }
-}
+    const navLinks = document.getElementById("nav-links");
+    if (!navLinks) return;
 
-function parseDecimal(mongoDecimalObj) {
-    return mongoDecimalObj && mongoDecimalObj.$numberDecimal ? 
-           parseFloat(mongoDecimalObj.$numberDecimal) : parseFloat(mongoDecimalObj);
+    if (!currentUser) {
+        navLinks.innerHTML = "";
+        return;
+    }
+
+    const roleName = currentUser.roleName || getRoleName(currentUser.role_id);
+    const buttons = [];
+
+    if (roleName === "customer") {
+        buttons.push(`<button class="compact-btn btn-secondary" onclick="loadRestaurants()">Home</button>`);
+        buttons.push(`<button class="compact-btn" onclick="loadMyOrders()">My Orders</button>`);
+        buttons.push(`<button class="compact-btn ghost-btn" onclick="loadProfile()">Profile</button>`);
+    }
+    if (roleName === "restaurant_owner") {
+        buttons.push(`<button class="compact-btn btn-secondary" onclick="loadOwnerDashboard()">Dashboard</button>`);
+        buttons.push(`<button class="compact-btn ghost-btn" onclick="loadProfile()">Profile</button>`);
+    }
+    if (roleName === "delivery_partner") {
+        buttons.push(`<button class="compact-btn btn-secondary" onclick="loadDeliveryDashboard()">Deliveries</button>`);
+        buttons.push(`<button class="compact-btn ghost-btn" onclick="loadProfile()">Profile</button>`);
+    }
+
+    navLinks.innerHTML = `
+        <span>Signed in as <b>${escapeHtml(currentUser.full_name)}</b> (${escapeHtml(roleName)})</span>
+        ${buttons.join("")}
+        <button class="compact-btn btn-danger" onclick="logout()">Logout</button>
+    `;
 }
 
 function routeUserByRole() {
-    if (!currentUser) return showView('auth-section');
+    if (!currentUser) return showView("auth-section");
+    const roleName = currentUser.roleName || getRoleName(currentUser.role_id);
 
-    switch(currentUser.roleName) {
-        case 'customer':
-            checkCustomerProfileCompletion();
-            break;
-        case 'restaurant_owner':
-            loadOwnerDashboard();
-            break;
-        case 'delivery_partner':
-            loadDeliveryDashboard();
-            break;
-        case 'admin':
-            alert("Admin dashboard not implemented in this demo.");
-            break;
-        default:
-            showView('auth-section');
+    if (roleName === "customer") {
+        if (!currentUser.address?.street) return loadProfile(true);
+        return loadRestaurants();
     }
+    if (roleName === "restaurant_owner") return loadOwnerDashboard();
+    if (roleName === "delivery_partner") return loadDeliveryDashboard();
+    showView("auth-section");
 }
 
-// --- AUTHENTICATION ---
 async function handleLogin() {
-    const email = document.getElementById('login-email').value;
+    const email = document.getElementById("login-email").value.trim();
+    const password = document.getElementById("login-password").value;
+
+    if (!email || !password) return notify("Email and password are required.");
+
     try {
-        if (systemRoles.length === 0) await fetchRoles();
-
-        const res = await fetch(`${USER_API}/users`);
-        const users = await res.json();
-        let user = users.find(u => u.email === email);
-        
-        if (user) {
-            const userRole = systemRoles.find(r => r._id === user.role_id);
-            user.roleName = userRole ? userRole.role_name : 'customer';
-
-            currentUser = user;
-            localStorage.setItem('indicrave_user', JSON.stringify(user));
-            updateNav();
-            routeUserByRole();
-        } else {
-            alert("User not found. Please register.");
-        }
+        const payload = await apiRequest(`${USER_API}/users/login`, {
+            method: "POST",
+            body: JSON.stringify({ email, password })
+        });
+        currentUser = payload.data;
+        currentUser.roleName = currentUser.roleName || getRoleName(currentUser.role_id);
+        persistCurrentUser();
+        updateNav();
+        routeUserByRole();
     } catch (err) {
-        console.error(err);
-        alert("Failed to connect to User Service (Port 3000). Is it running?");
+        notify(err.message);
     }
 }
 
 async function handleRegister() {
-    const name = document.getElementById('reg-name').value;
-    const email = document.getElementById('reg-email').value;
-    const phone = document.getElementById('reg-phone').value;
+    const full_name = document.getElementById("reg-name").value.trim();
+    const email = document.getElementById("reg-email").value.trim();
+    const phone = document.getElementById("reg-phone").value.trim();
+    const password = document.getElementById("reg-password").value;
 
-    if (!name || !email || !phone) return alert("Please fill in your Name, Email, and Phone.");
+    if (!full_name || !email || !phone || !password) {
+        return notify("Name, email, phone, and password are required.");
+    }
 
     try {
-        if (systemRoles.length === 0) await fetchRoles();
-        const customerRole = systemRoles.find(r => r.role_name === 'customer');
-
-        if (!customerRole) return alert("Error: 'customer' role not found. Ensure DB is seeded.");
-
-        const newUser = {
-            full_name: name,
-            email: email,
-            phone: phone,
-            password_hash: "mock_hash_for_demo", 
-            role_id: customerRole._id
-        };
-
-        const res = await fetch(`${USER_API}/users`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newUser)
+        await apiRequest(`${USER_API}/users/register`, {
+            method: "POST",
+            body: JSON.stringify({ full_name, email, phone, password, role_name: "customer" })
         });
-
-        const data = await res.json();
-        
-        if (res.ok && data.data) {
-            alert("Registration successful! Please login.");
-            document.querySelectorAll('#auth-section input').forEach(input => input.value = '');
-        } else {
-            alert("Registration failed: " + (data.error || "Unknown error"));
-        }
+        notify("Registration successful. You can log in now.");
+        ["reg-name", "reg-email", "reg-phone", "reg-password"].forEach((id) => {
+            document.getElementById(id).value = "";
+        });
     } catch (err) {
-        console.error(err);
-        alert("Failed to connect. Make sure your User Service is running.");
+        notify(err.message);
     }
 }
 
 function logout() {
     currentUser = null;
-    localStorage.removeItem('indicrave_user');
+    currentRestaurant = null;
+    cart = [];
+    appliedPromo = null;
+    selectedOwnerRestaurantId = null;
+    localStorage.removeItem("indicrave_user");
     updateNav();
-    showView('auth-section');
+    showView("auth-section");
 }
 
-// --- PROFILE LOGIC ---
-function checkCustomerProfileCompletion() {
-    if (!currentUser.address || !currentUser.address.street) {
-        alert("Please provide your delivery address before ordering.");
-        loadProfile();
-        document.getElementById('btn-cancel-profile').style.display = 'none';
-    } else {
-        loadRestaurants();
-    }
-}
-
-function loadProfile() {
-    if (currentUser.address) {
-        document.getElementById('prof-street').value = currentUser.address.street || "";
-        document.getElementById('prof-city').value = currentUser.address.city || "";
-        document.getElementById('prof-state').value = currentUser.address.state || "";
-        document.getElementById('prof-pincode').value = currentUser.address.pincode || "";
-        document.getElementById('btn-cancel-profile').style.display = 'inline-block';
-    } else {
-        document.getElementById('btn-cancel-profile').style.display = 'none';
-    }
-    showView('profile-section');
+function loadProfile(force = false) {
+    if (!currentUser) return;
+    document.getElementById("prof-name").value = currentUser.full_name || "";
+    document.getElementById("prof-phone").value = currentUser.phone || "";
+    document.getElementById("prof-street").value = currentUser.address?.street || "";
+    document.getElementById("prof-city").value = currentUser.address?.city || "";
+    document.getElementById("prof-state").value = currentUser.address?.state || "";
+    document.getElementById("prof-pincode").value = currentUser.address?.pincode || "";
+    document.getElementById("btn-cancel-profile").style.display = force ? "none" : "block";
+    showView("profile-section");
 }
 
 async function saveProfile() {
-    const street = document.getElementById('prof-street').value;
-    const city = document.getElementById('prof-city').value;
-    const state = document.getElementById('prof-state').value;
-    const pincode = document.getElementById('prof-pincode').value;
+    if (!currentUser) return;
+    const full_name = document.getElementById("prof-name").value.trim();
+    const phone = document.getElementById("prof-phone").value.trim();
+    const street = document.getElementById("prof-street").value.trim();
+    const city = document.getElementById("prof-city").value.trim();
+    const state = document.getElementById("prof-state").value.trim();
+    const pincode = document.getElementById("prof-pincode").value.trim();
 
-    if (!street || !city || !state || !pincode) return alert("Please fill out all address fields.");
+    if (!full_name || !phone || !street || !city) {
+        return notify("Name, phone, street, and city are required.");
+    }
 
     try {
-        const addressData = { address: { street, city, state, pincode } };
-
-        const res = await fetch(`${USER_API}/users/${currentUser._id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(addressData)
+        const payload = await apiRequest(`${USER_API}/users/${currentUser._id}`, {
+            method: "PUT",
+            body: JSON.stringify({ full_name, phone, address: { street, city, state, pincode } })
         });
-
-        if (res.ok) {
-            const updatedData = await res.json();
-            currentUser.address = updatedData.data.address; 
-            localStorage.setItem('indicrave_user', JSON.stringify(currentUser));
-            alert("Profile saved successfully!");
-            routeUserByRole(); 
-        } else {
-            const errData = await res.json();
-            alert("Failed to update profile: " + (errData.error || errData.message));
-        }
+        currentUser = { ...payload.data, roleName: currentUser.roleName || getRoleName(payload.data.role_id) };
+        persistCurrentUser();
+        updateNav();
+        notify("Profile saved.");
+        routeUserByRole();
     } catch (err) {
-        console.error(err);
-        alert("Network Error: Ensure User Service is running.");
+        notify(err.message);
     }
 }
 
-// ==========================================
-// ROLE: CUSTOMER FLOW (RESTAURANTS, MENU, CART, ORDERS)
-// ==========================================
+async function changePassword() {
+    if (!currentUser) return;
+    const currentPassword = document.getElementById("pwd-current").value;
+    const newPassword = document.getElementById("pwd-new").value;
+
+    if (!currentPassword || !newPassword) return notify("Both password fields are required.");
+
+    try {
+        await apiRequest(`${USER_API}/users/${currentUser._id}/password`, {
+            method: "PUT",
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        document.getElementById("pwd-current").value = "";
+        document.getElementById("pwd-new").value = "";
+        notify("Password updated.");
+    } catch (err) {
+        notify(err.message);
+    }
+}
 
 async function loadRestaurants() {
+    if (!currentUser) return;
+
+    const search = document.getElementById("restaurant-search")?.value.trim() || "";
+    const cuisine = document.getElementById("restaurant-cuisine")?.value.trim() || "";
+    const city = document.getElementById("restaurant-city")?.value.trim() || "";
+    const sort = document.getElementById("restaurant-sort")?.value || "";
+    const open = document.getElementById("restaurant-open")?.value || "";
+
     try {
-        const res = await fetch(`${RESTAURANT_API}/restaurants`);
-        const restaurants = await res.json();
-        
-        const grid = document.getElementById('restaurants-grid');
-        grid.innerHTML = restaurants.map(r => `
-            <div class="card">
-                <h3>${r.restaurant_name}</h3>
-                <p>Cuisine: ${r.cuisine_type || 'Various'}</p>
-                <p>Rating: ⭐ ${r.rating || 'N/A'}</p>
-                <p>Hours: ${r.opening_hours || 'Not specified'}</p>
-                <button onclick="loadMenu('${r._id}', '${r.restaurant_name}')">View Menu</button>
-            </div>
-        `).join('');
-        
-        showView('restaurants-section');
+        const params = new URLSearchParams();
+        if (cuisine) params.set("cuisine", cuisine);
+        if (city) params.set("city", city);
+        if (sort) params.set("sort", sort);
+        if (open !== "") params.set("is_open", open);
+
+        const [restaurantsPayload, orderStatsPayload, paymentStatsPayload] = await Promise.all([
+            search
+                ? apiRequest(`${RESTAURANT_API}/restaurants/search/${encodeURIComponent(search)}`)
+                : apiRequest(`${RESTAURANT_API}/restaurants${params.toString() ? `?${params}` : ""}`),
+            apiRequest(`${ORDER_API}/orders/stats/summary?user_id=${currentUser._id}`),
+            apiRequest(`${PAYMENT_API}/payments/stats/summary?user_id=${currentUser._id}`)
+        ]);
+
+        const restaurants = restaurantsPayload.data || [];
+        const orderStats = orderStatsPayload.data || {};
+        const paymentStats = paymentStatsPayload.data || {};
+
+        renderStats("customer-summary", [
+            { label: "Orders", value: orderStats.total_orders ?? 0 },
+            { label: "Delivered", value: orderStats.delivered_orders ?? 0 },
+            { label: "Spend", value: formatCurrency(paymentStats.total_revenue || 0) },
+            { label: "Success Rate", value: paymentStats.success_rate || "0%" }
+        ]);
+
+        const grid = document.getElementById("restaurants-grid");
+        if (!restaurants.length) {
+            grid.innerHTML = `<div class="card"><h3>No restaurants found</h3><p class="muted-note">Try a different search or filter.</p></div>`;
+        } else {
+            grid.innerHTML = restaurants.map((restaurant) => `
+                <div class="card">
+                    <div class="row-between">
+                        <h3>${escapeHtml(restaurant.restaurant_name)}</h3>
+                        <span class="status-badge status-${restaurant.is_open ? "delivered" : "cancelled"}">${restaurant.is_open ? "Open" : "Closed"}</span>
+                    </div>
+                    <p class="meta-line">${escapeHtml(restaurant.cuisine_type || "Various cuisines")}</p>
+                    <div class="tag-row">
+                        <span class="tag">⭐ ${escapeHtml((restaurant.rating || 0).toString())}</span>
+                        <span class="tag">${escapeHtml((restaurant.delivery_time || 30).toString())} mins</span>
+                        <span class="tag">Min ${formatCurrency(restaurant.minimum_order)}</span>
+                    </div>
+                    <p class="meta-line">${escapeHtml([restaurant.address?.street, restaurant.address?.city].filter(Boolean).join(", ") || "Address not listed")}</p>
+                    <p class="meta-line">Hours: ${escapeHtml(restaurant.opening_hours || "Not specified")}</p>
+                    <div class="card-actions">
+                        <button class="compact-btn" onclick="loadMenu('${restaurant._id}')">View Menu</button>
+                        <button class="compact-btn btn-secondary" onclick="viewRestaurantDetails('${restaurant._id}')">Details</button>
+                    </div>
+                </div>
+            `).join("");
+        }
+
+        showView("restaurants-section");
     } catch (err) {
-        console.error(err);
+        notify(err.message);
     }
 }
 
-async function loadMenu(restaurantId, restaurantName) {
-    currentRestaurantId = restaurantId;
-    document.getElementById('current-restaurant-name').innerText = `${restaurantName} - Menu`;
-    cart = []; 
-    updateCartUI();
-
+async function viewRestaurantDetails(restaurantId) {
     try {
-        const res = await fetch(`${RESTAURANT_API}/menus`);
-        const allMenus = await res.json();
-        menuItemsCache = allMenus.filter(m => m.restaurant_id === restaurantId);
+        const [restaurantPayload, reviewsPayload] = await Promise.all([
+            apiRequest(`${RESTAURANT_API}/restaurants/${restaurantId}`),
+            apiRequest(`${RESTAURANT_API}/reviews?restaurant_id=${restaurantId}`)
+        ]);
 
-        const grid = document.getElementById('menu-grid');
-        grid.innerHTML = menuItemsCache.map(m => `
-            <div class="card">
-                <h4>${m.item_name}</h4>
-                <p style="font-size: 0.9em; color: #666; margin-top: -10px;">${m.description || ''}</p>
-                <p style="font-size: 0.9em;">${m.category} | ${m.is_vegetarian ? '🟢 Veg' : '🔴 Non-Veg'} | ⏳ ${m.preparation_time || '--'} mins</p>
-                <p><b>₹${parseDecimal(m.price).toFixed(2)}</b></p>
-                <button onclick="addToCart('${m._id}')">Add to Cart</button>
-            </div>
-        `).join('');
+        const restaurant = restaurantPayload.data;
+        const reviews = reviewsPayload.data || [];
+        const summary = reviews.length
+            ? reviews.slice(0, 3).map((review) => `${review.rating}/5: ${review.comment || "No comment"}`).join("\n")
+            : "No reviews yet.";
 
-        showView('menu-section');
+        notify(
+            `${restaurant.restaurant_name}\n` +
+            `Cuisine: ${restaurant.cuisine_type || "Various"}\n` +
+            `Rating: ${restaurant.rating || 0}\n` +
+            `Delivery time: ${restaurant.delivery_time || 30} mins\n` +
+            `Minimum order: ${formatCurrency(restaurant.minimum_order)}\n\n` +
+            `Recent reviews:\n${summary}`
+        );
     } catch (err) {
-        console.error(err);
+        notify(err.message);
     }
+}
+
+async function loadMenu(restaurantId) {
+    try {
+        const [restaurantPayload, menuPayload] = await Promise.all([
+            apiRequest(`${RESTAURANT_API}/restaurants/${restaurantId}`),
+            apiRequest(`${RESTAURANT_API}/menus?restaurant_id=${restaurantId}&available=true`)
+        ]);
+
+        currentRestaurant = restaurantPayload.data;
+        menuItemsCache = menuPayload.data || [];
+        cart = [];
+        appliedPromo = null;
+
+        document.getElementById("current-restaurant-name").textContent = currentRestaurant.restaurant_name;
+        document.getElementById("restaurant-meta").textContent = `${currentRestaurant.cuisine_type || "Cuisine"} • ${currentRestaurant.delivery_time || 30} mins • Minimum order ${formatCurrency(currentRestaurant.minimum_order)}`;
+        document.getElementById("promo-code").value = "";
+        document.getElementById("order-note").value = "";
+        document.getElementById("menu-search").value = "";
+        document.getElementById("menu-category").value = "";
+        document.getElementById("menu-veg").value = "";
+        renderMenuItems();
+        updateCartUI();
+        showView("menu-section");
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+function renderMenuItems() {
+    const search = document.getElementById("menu-search").value.trim().toLowerCase();
+    const category = document.getElementById("menu-category").value;
+    const vegFilter = document.getElementById("menu-veg").value;
+    const grid = document.getElementById("menu-grid");
+
+    const filtered = menuItemsCache.filter((item) => {
+        if (search && !`${item.item_name} ${item.description || ""}`.toLowerCase().includes(search)) return false;
+        if (category && item.category !== category) return false;
+        if (vegFilter === "veg" && !item.is_vegetarian) return false;
+        if (vegFilter === "vegan" && !item.is_vegan) return false;
+        if (vegFilter === "available" && !item.is_available) return false;
+        return true;
+    });
+
+    if (!filtered.length) {
+        grid.innerHTML = `<div class="card"><h3>No menu items match the filter</h3><p class="muted-note">Reset the menu filters to see more items.</p></div>`;
+        return;
+    }
+
+    grid.innerHTML = filtered.map((item) => `
+        <div class="card">
+            <div class="row-between">
+                <h3>${escapeHtml(item.item_name)}</h3>
+                <span class="tag">${formatCurrency(item.price)}</span>
+            </div>
+            <p class="meta-line">${escapeHtml(item.description || "No description available.")}</p>
+            <div class="tag-row">
+                <span class="tag">${escapeHtml(item.category || "main_course")}</span>
+                <span class="tag">${item.is_vegan ? "Vegan" : item.is_vegetarian ? "Vegetarian" : "Non-veg"}</span>
+                <span class="tag">${escapeHtml(item.spice_level || "medium")}</span>
+                <span class="tag">${escapeHtml((item.preparation_time || 15).toString())} mins</span>
+            </div>
+            <button onclick="addToCart('${item._id}')">Add to Cart</button>
+        </div>
+    `).join("");
 }
 
 function addToCart(menuId) {
-    const item = menuItemsCache.find(m => m._id === menuId);
-    const existingItem = cart.find(c => c._id === menuId);
-    if (existingItem) {
-        existingItem.quantity += 1;
-    } else {
-        cart.push({ ...item, quantity: 1, special_instructions: "" });
+    const item = menuItemsCache.find((entry) => entry._id === menuId);
+    if (!item) return;
+
+    const existing = cart.find((entry) => entry._id === menuId);
+    if (existing) existing.quantity += 1;
+    else {
+        cart.push({
+            _id: item._id,
+            item_name: item.item_name,
+            price: parseDecimal(item.price),
+            quantity: 1,
+            special_instructions: ""
+        });
     }
+
+    updateCartUI();
+}
+
+function updateCartItem(menuId, delta) {
+    const item = cart.find((entry) => entry._id === menuId);
+    if (!item) return;
+    item.quantity += delta;
+    if (item.quantity <= 0) cart = cart.filter((entry) => entry._id !== menuId);
     updateCartUI();
 }
 
 function updateInstruction(menuId, value) {
-    const item = cart.find(c => c._id === menuId);
+    const item = cart.find((entry) => entry._id === menuId);
     if (item) item.special_instructions = value;
 }
 
-function updateCartUI() {
-    const cartDiv = document.getElementById('cart-items');
-    const totalSpan = document.getElementById('cart-total-amount');
-    const checkoutBtn = document.getElementById('checkout-btn');
+function clearCart() {
+    cart = [];
+    appliedPromo = null;
+    document.getElementById("promo-code").value = "";
+    updateCartUI();
+}
 
-    if (cart.length === 0) {
-        cartDiv.innerHTML = "<p>Cart is empty</p>";
-        totalSpan.innerText = "0.00";
+function calculateCartTotals() {
+    const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const minimumOrder = currentRestaurant ? parseDecimal(currentRestaurant.minimum_order) : 0;
+    const deliveryFee = subtotal >= 300 || subtotal === 0 ? 0 : 40;
+    const taxAmount = subtotal * 0.05;
+
+    let discountAmount = 0;
+    if (appliedPromo) {
+        if (appliedPromo.type === "percent") discountAmount = subtotal * (appliedPromo.value / 100);
+        if (appliedPromo.type === "delivery") discountAmount = deliveryFee;
+    }
+
+    const finalAmount = Math.max(subtotal - discountAmount + deliveryFee + taxAmount, 0);
+    return {
+        subtotal,
+        discountAmount,
+        deliveryFee,
+        taxAmount,
+        finalAmount,
+        minimumOrder,
+        belowMinimum: minimumOrder > 0 && subtotal < minimumOrder
+    };
+}
+
+function updateCartUI() {
+    const cartItems = document.getElementById("cart-items");
+    const cartBreakdown = document.getElementById("cart-breakdown");
+    const checkoutBtn = document.getElementById("checkout-btn");
+    const totals = calculateCartTotals();
+
+    if (!cart.length) {
+        cartItems.innerHTML = `<p class="muted-note">Cart is empty.</p>`;
+        cartBreakdown.innerHTML = "";
         checkoutBtn.disabled = true;
+        checkoutBtn.textContent = "Place Order";
         return;
     }
 
-    checkoutBtn.disabled = false;
-    let totalAmount = 0;
-    
-    cartDiv.innerHTML = cart.map(item => {
-        const itemTotal = parseDecimal(item.price) * item.quantity;
-        totalAmount += itemTotal;
-        return `
-            <div class="cart-item" style="flex-direction: column; gap: 5px;">
-                <div style="display: flex; justify-content: space-between;">
-                    <b>${item.item_name} (x${item.quantity})</b>
-                    <span>₹${itemTotal.toFixed(2)}</span>
-                </div>
-                <input type="text" 
-                       placeholder="Special instructions (e.g., extra cheese)" 
-                       style="width: 90%; padding: 4px; font-size: 0.8rem; margin:0;"
-                       value="${item.special_instructions}"
-                       onchange="updateInstruction('${item._id}', this.value)">
+    cartItems.innerHTML = cart.map((item) => `
+        <div class="cart-item">
+            <div class="row-between">
+                <strong>${escapeHtml(item.item_name)}</strong>
+                <span>${formatCurrency(item.price * item.quantity)}</span>
             </div>
-        `;
-    }).join('');
+            <div class="button-row" style="margin: 0.6rem 0;">
+                <button class="compact-btn ghost-btn" onclick="updateCartItem('${item._id}', -1)">-</button>
+                <span class="qty-count">${item.quantity}</span>
+                <button class="compact-btn ghost-btn" onclick="updateCartItem('${item._id}', 1)">+</button>
+            </div>
+            <input type="text" value="${escapeHtml(item.special_instructions)}" placeholder="Special instructions" onchange="updateInstruction('${item._id}', this.value)">
+        </div>
+    `).join("");
 
-    totalSpan.innerText = totalAmount.toFixed(2);
+    cartBreakdown.innerHTML = `
+        <div class="price-line"><span>Subtotal</span><span>${formatCurrency(totals.subtotal)}</span></div>
+        <div class="price-line"><span>Discount${appliedPromo ? ` (${escapeHtml(appliedPromo.code)})` : ""}</span><span>- ${formatCurrency(totals.discountAmount)}</span></div>
+        <div class="price-line"><span>Delivery fee</span><span>${formatCurrency(totals.deliveryFee)}</span></div>
+        <div class="price-line"><span>Tax (5%)</span><span>${formatCurrency(totals.taxAmount)}</span></div>
+        <div class="price-line total"><span>Total</span><span>${formatCurrency(totals.finalAmount)}</span></div>
+        ${totals.belowMinimum ? `<div class="price-line"><span>Minimum order required</span><span>${formatCurrency(totals.minimumOrder)}</span></div>` : ""}
+    `;
+
+    checkoutBtn.disabled = totals.belowMinimum || !currentUser?.address?.street;
+    checkoutBtn.textContent = totals.belowMinimum ? `Minimum ${formatCurrency(totals.minimumOrder)}` : "Place Order";
+}
+
+function applyPromoCode() {
+    const code = document.getElementById("promo-code").value.trim().toUpperCase();
+    if (!code) {
+        appliedPromo = null;
+        return updateCartUI();
+    }
+    if (!PROMO_CODES[code]) return notify("Promo code not recognized.");
+    appliedPromo = { ...PROMO_CODES[code], code };
+    notify(`Promo applied: ${PROMO_CODES[code].label}`);
+    updateCartUI();
 }
 
 async function processCheckout() {
-    if (!currentUser.address || !currentUser.address.street) return checkCustomerProfileCompletion();
+    if (!currentUser?.address?.street) {
+        notify("Complete your profile before placing an order.");
+        return loadProfile(true);
+    }
 
-    document.getElementById('checkout-btn').disabled = true;
-    document.getElementById('checkout-btn').innerText = "Processing...";
-    let totalAmount = cart.reduce((sum, item) => sum + (parseDecimal(item.price) * item.quantity), 0);
+    const totals = calculateCartTotals();
+    if (!cart.length) return notify("Add items to the cart first.");
+    if (totals.belowMinimum) return notify(`Minimum order is ${formatCurrency(totals.minimumOrder)}.`);
+
+    const checkoutBtn = document.getElementById("checkout-btn");
+    const payment_method = document.getElementById("payment-method").value;
+    const payment_gateway = document.getElementById("payment-gateway").value;
+    const special_instructions = document.getElementById("order-note").value.trim();
 
     try {
-        const estimatedTime = new Date(Date.now() + 45 * 60000);
+        checkoutBtn.disabled = true;
+        checkoutBtn.textContent = "Processing...";
 
-        // 1. Create Order 
-        const orderData = {
-            user_id: currentUser._id,
-            restaurant_id: currentRestaurantId,
-            total_amount: totalAmount.toString(),
-            status: "pending",
-            delivery_address: currentUser.address, 
-            estimated_delivery_time: estimatedTime.toISOString()
-        };
-
-        const orderRes = await fetch(`${ORDER_API}/orders`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(orderData)
-        });
-        const createdOrder = await orderRes.json();
-        if (!orderRes.ok) throw new Error(createdOrder.error || "Failed to create order");
-        const orderId = createdOrder.data._id;
-
-        // 2. Add Order Items 
-        for (const item of cart) {
-            const itemRes = await fetch(`${ORDER_API}/order_items`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    order_id: orderId, 
-                    menu_id: item._id, 
-                    quantity: item.quantity,
-                    price_at_order: parseDecimal(item.price).toString(),
-                    special_instructions: item.special_instructions ? item.special_instructions : null
-                })
-            });
-            if (!itemRes.ok) {
-                const itemErr = await itemRes.json();
-                throw new Error(`Failed to add ${item.item_name} to order: ${itemErr.error}`);
-            }
-        }
-
-        // 3. Process Payment 
-        const paymentRes = await fetch(`${PAYMENT_API}/payments`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const orderPayload = await apiRequest(`${ORDER_API}/orders`, {
+            method: "POST",
             body: JSON.stringify({
-                order_id: orderId, user_id: currentUser._id, amount: totalAmount.toString(),
-                payment_method: "UPI", payment_status: "completed", transaction_id: "TXN" + Date.now() 
+                user_id: currentUser._id,
+                restaurant_id: currentRestaurant._id,
+                delivery_address: currentUser.address,
+                total_amount: totals.subtotal.toFixed(2),
+                discount_amount: totals.discountAmount.toFixed(2),
+                delivery_fee: totals.deliveryFee.toFixed(2),
+                tax_amount: totals.taxAmount.toFixed(2),
+                special_instructions
             })
         });
-        if (!paymentRes.ok) {
-            const paymentError = await paymentRes.json();
-            throw new Error(`Payment failed: ${paymentError.error}`);
-        }
 
-        // 4. Confirm Order
-        await fetch(`${ORDER_API}/orders/${orderId}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: "confirmed" })
+        const order = orderPayload.data;
+
+        await apiRequest(`${ORDER_API}/order_items/batch`, {
+            method: "POST",
+            body: JSON.stringify({
+                items: cart.map((item) => ({
+                    order_id: order._id,
+                    menu_id: item._id,
+                    item_name: item.item_name,
+                    quantity: item.quantity,
+                    price_at_order: item.price.toFixed(2),
+                    special_instructions: item.special_instructions || null
+                }))
+            })
         });
 
-        showView('success-section');
-        document.getElementById('checkout-btn').innerText = "Proceed to Pay";
-        
+        const paymentPayload = await apiRequest(`${PAYMENT_API}/payments/process`, {
+            method: "POST",
+            body: JSON.stringify({
+                order_id: order._id,
+                user_id: currentUser._id,
+                amount: totals.finalAmount.toFixed(2),
+                payment_method,
+                payment_gateway
+            })
+        });
+
+        const orderStatus = paymentPayload.data.payment_status === "completed" ? "confirmed" : "pending";
+        await apiRequest(`${ORDER_API}/orders/${order._id}`, {
+            method: "PUT",
+            body: JSON.stringify({ status: orderStatus })
+        });
+
+        document.getElementById("success-message").textContent =
+            paymentPayload.data.payment_status === "completed"
+                ? `Payment successful via ${payment_method}. Order ${order._id.slice(-6)} is confirmed.`
+                : `Payment failed for order ${order._id.slice(-6)}. Retry from My Orders.`;
+
+        cart = [];
+        appliedPromo = null;
+        showView("success-section");
     } catch (err) {
-        console.error(err);
-        alert("Transaction failed: " + err.message);
-        document.getElementById('checkout-btn').disabled = false;
-        document.getElementById('checkout-btn').innerText = "Proceed to Pay";
+        notify(err.message);
+    } finally {
+        checkoutBtn.disabled = false;
+        checkoutBtn.textContent = "Place Order";
+        updateCartUI();
     }
 }
 
-// --- MY ORDERS & REVIEWS ---
 async function loadMyOrders() {
+    if (!currentUser) return;
+
     try {
-        const resOrders = await fetch(`${ORDER_API}/orders`);
-        const allOrders = await resOrders.json();
-        const myOrders = allOrders.filter(o => o.user_id === currentUser._id);
+        const [ordersPayload, restaurantsPayload, reviewsPayload, paymentStatsPayload] = await Promise.all([
+            apiRequest(`${ORDER_API}/orders?user_id=${currentUser._id}`),
+            apiRequest(`${RESTAURANT_API}/restaurants`),
+            apiRequest(`${RESTAURANT_API}/reviews?user_id=${currentUser._id}`),
+            apiRequest(`${PAYMENT_API}/payments/stats/summary?user_id=${currentUser._id}`)
+        ]);
 
-        const resRest = await fetch(`${RESTAURANT_API}/restaurants`);
-        const allRestaurants = await resRest.json();
+        const orders = ordersPayload.data || [];
+        const restaurants = restaurantsPayload.data || [];
+        const reviews = reviewsPayload.data || [];
+        const paymentStats = paymentStatsPayload.data || {};
 
-        const resReviews = await fetch(`${RESTAURANT_API}/reviews`);
-        const allReviews = await resReviews.json();
+        const ordersWithExtras = await Promise.all(orders.map(async (order) => {
+            const [detailsPayload, payment] = await Promise.all([
+                apiRequest(`${ORDER_API}/orders/${order._id}`),
+                fetchPaymentForOrder(order._id)
+            ]);
+            return {
+                ...detailsPayload.data,
+                payment,
+                review: reviews.find((review) => review.order_id === order._id),
+                restaurant: restaurants.find((restaurant) => restaurant._id === order.restaurant_id)
+            };
+        }));
 
-        const resOrderItems = await fetch(`${ORDER_API}/order_items`);
-        const allOrderItems = await resOrderItems.json();
+        renderStats("order-stats", [
+            { label: "Total Orders", value: orders.length },
+            { label: "Delivered", value: orders.filter((order) => order.status === "delivered").length },
+            { label: "Pending", value: orders.filter((order) => ["pending", "confirmed", "preparing", "out_for_delivery"].includes(order.status)).length },
+            { label: "Net Spend", value: formatCurrency(paymentStats.total_revenue || 0) }
+        ]);
 
-        const resMenus = await fetch(`${RESTAURANT_API}/menus`);
-        const allMenus = await resMenus.json();
-
-        const container = document.getElementById('my-orders-container');
-        
-        if (myOrders.length === 0) {
-            container.innerHTML = "<p style='grid-column: 1 / -1;'>You haven't placed any orders yet.</p>";
+        const container = document.getElementById("my-orders-container");
+        if (!ordersWithExtras.length) {
+            container.innerHTML = `<div class="card"><h3>No orders yet</h3><p class="muted-note">Your order history will appear here.</p></div>`;
         } else {
-            // Sort by newest first
-            myOrders.sort((a,b) => new Date(b.order_date) - new Date(a.order_date));
-
-            container.innerHTML = myOrders.map(order => {
-                const rest = allRestaurants.find(r => r._id === order.restaurant_id);
-                const restName = rest ? rest.restaurant_name : "Unknown Restaurant";
-                const hasReviewed = allReviews.some(rev => rev.order_id === order._id);
-                
-                const itemsForThisOrder = allOrderItems.filter(item => item.order_id === order._id);
-                
-                const itemsHtml = itemsForThisOrder.map(item => {
-                    const menuInfo = allMenus.find(m => m._id === item.menu_id);
-                    const itemName = menuInfo ? menuInfo.item_name : "Unknown Item";
-                    const instructions = item.special_instructions 
-                                         ? `<br><small style="color: #666;">Note: ${item.special_instructions}</small>` 
-                                         : "";
-                    return `<li style="margin-bottom: 6px;">${itemName} <b>(x${item.quantity})</b>${instructions}</li>`;
-                }).join('');
-
-                const addr = order.delivery_address || {};
-                const addressHtml = [addr.street, addr.city, addr.state, addr.pincode].filter(Boolean).join(', ');
-
-                let actionHtml = '';
-                if (order.status === 'delivered' && !hasReviewed) {
-                    actionHtml = `<button onclick="openReviewModal('${order._id}', '${order.restaurant_id}')" style="margin-top: 15px; background-color: #1976D2;">Leave a Review</button>`;
-                } else if (hasReviewed) {
-                    actionHtml = `<p style="color: #2e7d32; font-weight: bold; margin-top: 15px;">✓ Reviewed</p>`;
-                }
+            container.innerHTML = ordersWithExtras.map((order) => {
+                const payment = order.payment;
+                const canCancel = ["pending", "confirmed"].includes(order.status);
+                const canRetryPayment = payment && payment.payment_status === "failed" && order.status !== "cancelled";
+                const canReview = order.status === "delivered";
+                const address = [order.delivery_address?.street, order.delivery_address?.city, order.delivery_address?.state, order.delivery_address?.pincode].filter(Boolean).join(", ");
 
                 return `
-                    <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
-                        <div>
-                            <h3 style="margin-top: 0; margin-bottom: 5px; color: var(--primary);">${restName}</h3>
-                            <p style="font-size: 0.8em; color: #888; margin-top: 0;">Order ID: ...${order._id.slice(-6)}</p>
-                            
-                            <div style="background: var(--bg-color); padding: 10px; border-radius: 6px; margin: 15px 0;">
-                                <h4 style="margin: 0 0 8px 0; font-size: 0.95em;">Items Ordered</h4>
-                                <ul style="margin: 0; padding-left: 20px; font-size: 0.9em; line-height: 1.4;">
-                                    ${itemsHtml || '<li>No items found</li>'}
-                                </ul>
+                    <div class="card">
+                        <div class="row-between">
+                            <div>
+                                <h3>${escapeHtml(order.restaurant?.restaurant_name || "Restaurant")}</h3>
+                                <p class="meta-line">Order ...${escapeHtml(order._id.slice(-6))}</p>
                             </div>
-
-                            <div style="font-size: 0.9em; line-height: 1.6;">
-                                <p style="margin: 5px 0;"><b>Delivery To:</b><br> ${addressHtml || 'No address provided'}</p>
-                                <p style="margin: 5px 0;"><b>Date:</b> ${new Date(order.order_date).toLocaleString()}</p>
-                                <p style="margin: 5px 0; font-size: 1.1em;"><b>Total:</b> ₹${parseDecimal(order.total_amount).toFixed(2)}</p>
-                            </div>
+                            <span class="status-badge status-${order.status}">${escapeHtml(order.status)}</span>
                         </div>
-
-                        <div>
-                            <p style="margin-top: 15px;"><b>Status:</b> <span class="status-badge status-${order.status}">${order.status}</span></p>
-                            ${actionHtml}
+                        <p class="meta-line">Placed: ${escapeHtml(formatDate(order.order_date))}</p>
+                        <p class="meta-line">ETA: ${escapeHtml(formatDate(order.estimated_delivery_time))}</p>
+                        <p class="meta-line">Delivery address: ${escapeHtml(address || "Not available")}</p>
+                        <ul class="order-list">
+                            ${(order.items || []).map((item) => `<li>${escapeHtml(item.item_name)} x${item.quantity} • ${formatCurrency(item.subtotal || parseDecimal(item.price_at_order) * item.quantity)}</li>`).join("")}
+                        </ul>
+                        <div class="tag-row">
+                            <span class="tag">Subtotal ${formatCurrency(order.total_amount)}</span>
+                            <span class="tag">Tax ${formatCurrency(order.tax_amount)}</span>
+                            <span class="tag">Delivery ${formatCurrency(order.delivery_fee)}</span>
+                            <span class="tag">Final ${formatCurrency(order.final_amount)}</span>
+                        </div>
+                        <div class="tag-row">
+                            <span class="tag">Payment: ${escapeHtml(payment?.payment_status || "not_attempted")}</span>
+                            <span class="tag">${escapeHtml(payment?.payment_method || "N/A")}</span>
+                        </div>
+                        ${order.special_instructions ? `<p class="meta-line">Order note: ${escapeHtml(order.special_instructions)}</p>` : ""}
+                        ${order.cancelled_reason ? `<p class="meta-line">Cancelled reason: ${escapeHtml(order.cancelled_reason)}</p>` : ""}
+                        ${order.review ? `<p class="meta-line">Review: ${order.review.rating}/5 ${escapeHtml(order.review.comment || "")}</p>` : ""}
+                        <div class="card-actions">
+                            ${canCancel ? `<button class="compact-btn btn-danger" onclick="cancelOrder('${order._id}')">Cancel Order</button>` : ""}
+                            ${canRetryPayment ? `<button class="compact-btn" onclick="retryPayment('${order._id}')">Retry Payment</button>` : ""}
+                            ${canReview ? `<button class="compact-btn btn-secondary" onclick="openReviewModal('${order._id}', '${order.restaurant_id}', '${order.review?._id || ""}')">${order.review ? "Edit Review" : "Leave Review"}</button>` : ""}
                         </div>
                     </div>
                 `;
-            }).join('');
+            }).join("");
         }
-        showView('my-orders-section');
-    } catch(err) {
-        console.error(err);
-        alert("Failed to load past orders.");
+
+        showView("my-orders-section");
+    } catch (err) {
+        notify(err.message);
     }
 }
 
-function openReviewModal(orderId, restaurantId) {
-    document.getElementById('review-order-id').value = orderId;
-    document.getElementById('review-restaurant-id').value = restaurantId;
-    document.getElementById('review-rating').value = 5;
-    document.getElementById('review-comment').value = '';
-    document.getElementById('review-modal').style.display = 'flex';
+async function fetchPaymentForOrder(orderId) {
+    try {
+        const payload = await apiRequest(`${PAYMENT_API}/payments/order/${orderId}`);
+        return payload.data;
+    } catch (err) {
+        return null;
+    }
 }
 
-function closeReviewModal() {
-    document.getElementById('review-modal').style.display = 'none';
-}
-
-async function submitReview() {
-    const orderId = document.getElementById('review-order-id').value;
-    const restaurantId = document.getElementById('review-restaurant-id').value;
-    const rating = parseInt(document.getElementById('review-rating').value);
-    const comment = document.getElementById('review-comment').value;
-
-    if (rating < 1 || rating > 5) return alert("Rating must be between 1 and 5.");
+async function cancelOrder(orderId) {
+    const reason = prompt("Cancellation reason:", "Changed my mind");
+    if (reason === null) return;
 
     try {
-        const res = await fetch(`${RESTAURANT_API}/reviews`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        await apiRequest(`${ORDER_API}/orders/${orderId}/cancel`, {
+            method: "PUT",
+            body: JSON.stringify({ reason })
+        });
+
+        const payment = await fetchPaymentForOrder(orderId);
+        if (payment && payment.payment_status === "completed") {
+            await apiRequest(`${PAYMENT_API}/payments/${payment._id}/refund`, {
+                method: "POST",
+                body: JSON.stringify({ reason: "Order cancelled by customer" })
+            });
+        }
+
+        notify("Order cancelled.");
+        loadMyOrders();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function retryPayment(orderId) {
+    try {
+        const [orderPayload, existingPayment] = await Promise.all([
+            apiRequest(`${ORDER_API}/orders/${orderId}`),
+            fetchPaymentForOrder(orderId)
+        ]);
+
+        const payment_method = prompt("Payment method for retry (UPI, wallet, COD, credit_card, debit_card, net_banking):", existingPayment?.payment_method || "UPI");
+        if (!payment_method) return;
+
+        const paymentPayload = await apiRequest(`${PAYMENT_API}/payments/process`, {
+            method: "POST",
             body: JSON.stringify({
-                user_id: currentUser._id,
-                restaurant_id: restaurantId,
                 order_id: orderId,
-                rating: rating,
-                comment: comment
+                user_id: currentUser._id,
+                amount: parseDecimal(orderPayload.data.final_amount).toFixed(2),
+                payment_method,
+                payment_gateway: "manual"
             })
         });
 
-        if (res.ok) {
-            alert("Thank you! Your review has been submitted.");
-            closeReviewModal();
-            loadMyOrders(); 
-        } else {
-            const err = await res.json();
-            alert("Failed to submit review: " + (err.error || err.message));
+        if (paymentPayload.data.payment_status === "completed") {
+            await apiRequest(`${ORDER_API}/orders/${orderId}`, {
+                method: "PUT",
+                body: JSON.stringify({ status: "confirmed" })
+            });
         }
-    } catch(err) {
-        console.error(err);
-        alert("Network error submitting review.");
+
+        notify(paymentPayload.message || "Payment retried.");
+        loadMyOrders();
+    } catch (err) {
+        notify(err.message);
     }
 }
 
-// ==========================================
-// ROLE: RESTAURANT OWNER FLOW
-// ==========================================
+function openReviewModal(orderId, restaurantId, reviewId = "") {
+    document.getElementById("review-order-id").value = orderId;
+    document.getElementById("review-restaurant-id").value = restaurantId;
+    document.getElementById("review-id").value = reviewId || "";
+    document.getElementById("review-modal-title").textContent = reviewId ? "Edit Review" : "Leave a Review";
+    document.getElementById("review-delete-btn").classList.toggle("hidden", !reviewId);
+    document.getElementById("review-rating").value = 5;
+    document.getElementById("review-comment").value = "";
+    document.getElementById("review-modal").classList.remove("hidden");
+    if (reviewId) prefillReview(reviewId);
+}
+
+async function prefillReview(reviewId) {
+    try {
+        const payload = await apiRequest(`${RESTAURANT_API}/reviews/${reviewId}`);
+        document.getElementById("review-rating").value = payload.data.rating;
+        document.getElementById("review-comment").value = payload.data.comment || "";
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+function closeReviewModal() {
+    document.getElementById("review-modal").classList.add("hidden");
+}
+
+async function submitReview() {
+    const reviewId = document.getElementById("review-id").value;
+    const order_id = document.getElementById("review-order-id").value;
+    const restaurant_id = document.getElementById("review-restaurant-id").value;
+    const rating = parseInt(document.getElementById("review-rating").value, 10);
+    const comment = document.getElementById("review-comment").value.trim();
+
+    try {
+        if (reviewId) {
+            await apiRequest(`${RESTAURANT_API}/reviews/${reviewId}`, {
+                method: "PUT",
+                body: JSON.stringify({ rating, comment })
+            });
+            notify("Review updated.");
+        } else {
+            await apiRequest(`${RESTAURANT_API}/reviews`, {
+                method: "POST",
+                body: JSON.stringify({ user_id: currentUser._id, restaurant_id, order_id, rating, comment })
+            });
+            notify("Review submitted.");
+        }
+        closeReviewModal();
+        loadMyOrders();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function deleteReview() {
+    const reviewId = document.getElementById("review-id").value;
+    if (!reviewId) return;
+    try {
+        await apiRequest(`${RESTAURANT_API}/reviews/${reviewId}`, { method: "DELETE" });
+        closeReviewModal();
+        notify("Review deleted.");
+        loadMyOrders();
+    } catch (err) {
+        notify(err.message);
+    }
+}
 
 async function loadOwnerDashboard() {
-    showView('owner-section');
-    const container = document.getElementById('owner-orders-container');
-    
+    if (!currentUser) return;
+
     try {
-        const resRest = await fetch(`${RESTAURANT_API}/restaurants`);
-        const allRestaurants = await resRest.json();
-        const myRestaurants = allRestaurants.filter(r => r.owner_id === currentUser._id);
-        const myRestaurantIds = myRestaurants.map(r => r._id);
+        const restaurantsPayload = await apiRequest(`${RESTAURANT_API}/restaurants`);
+        const myRestaurants = (restaurantsPayload.data || []).filter((restaurant) => restaurant.owner_id === currentUser._id);
+        const panel = document.getElementById("owner-restaurants-panel");
 
-        if (myRestaurantIds.length === 0) {
-            return container.innerHTML = "<p>You don't have any restaurants registered yet.</p>";
+        if (!myRestaurants.length) {
+            renderStats("owner-overview", [
+                { label: "Restaurants", value: 0 },
+                { label: "Active Orders", value: 0 },
+                { label: "Revenue", value: formatCurrency(0) },
+                { label: "Menu Items", value: 0 }
+            ]);
+            panel.innerHTML = `
+                <div class="card">
+                    <h3>Create Your First Restaurant</h3>
+                    <div class="filter-grid">
+                        <input type="text" id="owner-new-name" placeholder="Restaurant name">
+                        <input type="text" id="owner-new-cuisine" placeholder="Cuisine type">
+                        <input type="text" id="owner-new-city" placeholder="City">
+                        <input type="text" id="owner-new-hours" placeholder="Opening hours">
+                        <button onclick="createOwnerRestaurant()">Create Restaurant</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById("owner-orders-container").innerHTML = `<h3>No owner orders yet</h3><p class="muted-note">Create a restaurant first.</p>`;
+            return showView("owner-section");
         }
 
-        const resOrders = await fetch(`${ORDER_API}/orders`);
-        const allOrders = await resOrders.json();
-        
-        const activeOrders = allOrders.filter(o => 
-            myRestaurantIds.includes(o.restaurant_id) && 
-            o.status !== 'delivered' && o.status !== 'cancelled'
-        );
-
-        if (activeOrders.length === 0) {
-            return container.innerHTML = "<p>No active orders right now.</p>";
+        if (!selectedOwnerRestaurantId || !myRestaurants.some((restaurant) => restaurant._id === selectedOwnerRestaurantId)) {
+            selectedOwnerRestaurantId = myRestaurants[0]._id;
         }
 
-        container.innerHTML = `
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        <th>Order ID</th>
-                        <th>Total</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${activeOrders.map(order => `
-                        <tr>
-                            <td>...${order._id.slice(-6)}</td>
-                            <td>₹${parseDecimal(order.total_amount).toFixed(2)}</td>
-                            <td><span class="status-badge status-${order.status}">${order.status}</span></td>
-                            <td>
-                                <select id="status-owner-${order._id}" style="width: auto; margin:0; padding: 4px;">
-                                    <option value="confirmed" ${order.status === 'confirmed' ? 'selected' : ''}>Confirmed</option>
-                                    <option value="preparing" ${order.status === 'preparing' ? 'selected' : ''}>Preparing</option>
-                                    <option value="out_for_delivery" ${order.status === 'out_for_delivery' ? 'selected' : ''}>Out for Delivery</option>
-                                </select>
-                                <button onclick="updateOrderStatus('${order._id}', 'owner')" style="width: auto; padding: 4px 10px;">Save</button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+        const bundles = await Promise.all(myRestaurants.map(async (restaurant) => {
+            const [restaurantStats, orderStats, menus] = await Promise.all([
+                apiRequest(`${RESTAURANT_API}/restaurants/${restaurant._id}/stats`),
+                apiRequest(`${ORDER_API}/orders/stats/summary?restaurant_id=${restaurant._id}`),
+                apiRequest(`${RESTAURANT_API}/menus?restaurant_id=${restaurant._id}`)
+            ]);
+            return {
+                restaurant,
+                restaurantStats: restaurantStats.data,
+                orderStats: orderStats.data,
+                menus: menus.data || []
+            };
+        }));
+
+        const selectedBundle = bundles.find((bundle) => bundle.restaurant._id === selectedOwnerRestaurantId) || bundles[0];
+        selectedOwnerRestaurantId = selectedBundle.restaurant._id;
+
+        renderStats("owner-overview", [
+            { label: "Restaurants", value: myRestaurants.length },
+            { label: "Active Orders", value: bundles.reduce((sum, item) => sum + (item.orderStats.pending_orders || 0), 0) },
+            { label: "Revenue", value: formatCurrency(bundles.reduce((sum, item) => sum + parseDecimal(item.orderStats.total_revenue || 0), 0)) },
+            { label: "Menu Items", value: bundles.reduce((sum, item) => sum + item.menus.length, 0) }
+        ]);
+
+        panel.innerHTML = `
+            <div class="card" style="margin-bottom: 1rem;">
+                <div class="filter-grid">
+                    <select id="owner-restaurant-select" onchange="switchOwnerRestaurant(this.value)">
+                        ${myRestaurants.map((restaurant) => `<option value="${restaurant._id}" ${restaurant._id === selectedOwnerRestaurantId ? "selected" : ""}>${escapeHtml(restaurant.restaurant_name)}</option>`).join("")}
+                    </select>
+                    <input type="text" id="owner-restaurant-name" value="${escapeHtml(selectedBundle.restaurant.restaurant_name)}" placeholder="Restaurant name">
+                    <input type="text" id="owner-restaurant-cuisine" value="${escapeHtml(selectedBundle.restaurant.cuisine_type || "")}" placeholder="Cuisine">
+                    <input type="text" id="owner-restaurant-hours" value="${escapeHtml(selectedBundle.restaurant.opening_hours || "")}" placeholder="Opening hours">
+                    <input type="number" id="owner-restaurant-delivery" value="${escapeHtml((selectedBundle.restaurant.delivery_time || 30).toString())}" placeholder="Delivery time">
+                    <input type="number" id="owner-restaurant-minimum" value="${parseDecimal(selectedBundle.restaurant.minimum_order)}" placeholder="Minimum order">
+                    <select id="owner-restaurant-open">
+                        <option value="true" ${selectedBundle.restaurant.is_open ? "selected" : ""}>Open</option>
+                        <option value="false" ${!selectedBundle.restaurant.is_open ? "selected" : ""}>Closed</option>
+                    </select>
+                    <button onclick="saveOwnerRestaurant()">Save Restaurant</button>
+                </div>
+                <div class="tag-row">
+                    <span class="tag">Rating ${escapeHtml((selectedBundle.restaurantStats.average_rating || 0).toString())}</span>
+                    <span class="tag">Orders ${escapeHtml((selectedBundle.orderStats.total_orders || 0).toString())}</span>
+                    <span class="tag">Reviews ${escapeHtml((selectedBundle.restaurantStats.total_reviews || 0).toString())}</span>
+                </div>
+            </div>
+
+            <div class="profile-grid">
+                <div class="card">
+                    <h3>Add Menu Item</h3>
+                    <div class="filter-grid">
+                        <input type="text" id="owner-menu-name" placeholder="Item name">
+                        <input type="text" id="owner-menu-description" placeholder="Description">
+                        <input type="number" id="owner-menu-price" placeholder="Price">
+                        <select id="owner-menu-category">
+                            <option value="main_course">Main Course</option>
+                            <option value="appetizer">Appetizer</option>
+                            <option value="dessert">Dessert</option>
+                            <option value="beverage">Beverage</option>
+                            <option value="combo">Combo</option>
+                        </select>
+                        <select id="owner-menu-spice">
+                            <option value="mild">Mild</option>
+                            <option value="medium">Medium</option>
+                            <option value="hot">Hot</option>
+                            <option value="extra_hot">Extra Hot</option>
+                        </select>
+                        <input type="number" id="owner-menu-time" placeholder="Prep time">
+                        <select id="owner-menu-veg">
+                            <option value="false">Non-Veg</option>
+                            <option value="true">Vegetarian</option>
+                        </select>
+                        <button onclick="createMenuItem()">Add Menu Item</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Current Menu</h3>
+                    ${selectedBundle.menus.length ? `
+                        <table class="dashboard-table">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Price</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${selectedBundle.menus.map((menu) => `
+                                    <tr>
+                                        <td>${escapeHtml(menu.item_name)}</td>
+                                        <td>${formatCurrency(menu.price)}</td>
+                                        <td><span class="status-badge status-${menu.is_available ? "delivered" : "cancelled"}">${menu.is_available ? "Available" : "Hidden"}</span></td>
+                                        <td class="button-row">
+                                            <button class="compact-btn ghost-btn" onclick="toggleMenuAvailability('${menu._id}', ${menu.is_available ? "false" : "true"})">${menu.is_available ? "Hide" : "Show"}</button>
+                                            <button class="compact-btn btn-danger" onclick="deleteMenuItem('${menu._id}')">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join("")}
+                            </tbody>
+                        </table>
+                    ` : `<p class="muted-note">No menu items yet.</p>`}
+                </div>
+            </div>
         `;
+
+        await renderOwnerOrders(myRestaurants);
+        showView("owner-section");
     } catch (err) {
-        console.error(err);
-        container.innerHTML = "<p>Error loading dashboard. Ensure backend services are running.</p>";
+        notify(err.message);
     }
 }
 
-// ==========================================
-// ROLE: DELIVERY PARTNER FLOW
-// ==========================================
+async function renderOwnerOrders(myRestaurants) {
+    const container = document.getElementById("owner-orders-container");
+    const payloads = await Promise.all(myRestaurants.map((restaurant) => apiRequest(`${ORDER_API}/orders?restaurant_id=${restaurant._id}`)));
+    const orders = payloads.flatMap((payload) => payload.data || []).filter((order) => order.status !== "delivered" && order.status !== "cancelled");
+
+    if (!orders.length) {
+        container.innerHTML = `<h3>Active Orders</h3><p class="muted-note">No active orders right now.</p>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <h3>Active Orders</h3>
+        <table class="dashboard-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Update</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${orders.map((order) => `
+                    <tr>
+                        <td>...${escapeHtml(order._id.slice(-6))}</td>
+                        <td><span class="status-badge status-${order.status}">${escapeHtml(order.status)}</span></td>
+                        <td>${formatCurrency(order.final_amount)}</td>
+                        <td class="button-row">
+                            <select id="owner-status-${order._id}">
+                                <option value="confirmed" ${order.status === "confirmed" ? "selected" : ""}>Confirmed</option>
+                                <option value="preparing" ${order.status === "preparing" ? "selected" : ""}>Preparing</option>
+                                <option value="out_for_delivery" ${order.status === "out_for_delivery" ? "selected" : ""}>Out for Delivery</option>
+                                <option value="delivered" ${order.status === "delivered" ? "selected" : ""}>Delivered</option>
+                            </select>
+                            <button class="compact-btn" onclick="ownerUpdateOrderStatus('${order._id}')">Save</button>
+                        </td>
+                    </tr>
+                `).join("")}
+            </tbody>
+        </table>
+    `;
+}
+
+function switchOwnerRestaurant(value) {
+    selectedOwnerRestaurantId = value;
+    loadOwnerDashboard();
+}
+
+async function createOwnerRestaurant() {
+    try {
+        await apiRequest(`${RESTAURANT_API}/restaurants`, {
+            method: "POST",
+            body: JSON.stringify({
+                restaurant_name: document.getElementById("owner-new-name").value.trim(),
+                cuisine_type: document.getElementById("owner-new-cuisine").value.trim(),
+                owner_id: currentUser._id,
+                opening_hours: document.getElementById("owner-new-hours").value.trim(),
+                address: { city: document.getElementById("owner-new-city").value.trim() }
+            })
+        });
+        notify("Restaurant created.");
+        loadOwnerDashboard();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function saveOwnerRestaurant() {
+    try {
+        await apiRequest(`${RESTAURANT_API}/restaurants/${selectedOwnerRestaurantId}`, {
+            method: "PUT",
+            body: JSON.stringify({
+                restaurant_name: document.getElementById("owner-restaurant-name").value.trim(),
+                cuisine_type: document.getElementById("owner-restaurant-cuisine").value.trim(),
+                opening_hours: document.getElementById("owner-restaurant-hours").value.trim(),
+                delivery_time: parseInt(document.getElementById("owner-restaurant-delivery").value, 10) || 30,
+                minimum_order: parseFloat(document.getElementById("owner-restaurant-minimum").value || "0"),
+                is_open: document.getElementById("owner-restaurant-open").value === "true"
+            })
+        });
+        notify("Restaurant updated.");
+        loadOwnerDashboard();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function createMenuItem() {
+    try {
+        await apiRequest(`${RESTAURANT_API}/menus`, {
+            method: "POST",
+            body: JSON.stringify({
+                restaurant_id: selectedOwnerRestaurantId,
+                item_name: document.getElementById("owner-menu-name").value.trim(),
+                description: document.getElementById("owner-menu-description").value.trim(),
+                price: parseFloat(document.getElementById("owner-menu-price").value || "0"),
+                category: document.getElementById("owner-menu-category").value,
+                spice_level: document.getElementById("owner-menu-spice").value,
+                preparation_time: parseInt(document.getElementById("owner-menu-time").value, 10) || 15,
+                is_vegetarian: document.getElementById("owner-menu-veg").value === "true",
+                is_available: true
+            })
+        });
+        notify("Menu item added.");
+        loadOwnerDashboard();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function toggleMenuAvailability(menuId, nextAvailability) {
+    try {
+        await apiRequest(`${RESTAURANT_API}/menus/${menuId}`, {
+            method: "PUT",
+            body: JSON.stringify({ is_available: nextAvailability === "true" })
+        });
+        loadOwnerDashboard();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function deleteMenuItem(menuId) {
+    try {
+        await apiRequest(`${RESTAURANT_API}/menus/${menuId}`, { method: "DELETE" });
+        loadOwnerDashboard();
+    } catch (err) {
+        notify(err.message);
+    }
+}
+
+async function ownerUpdateOrderStatus(orderId) {
+    const status = document.getElementById(`owner-status-${orderId}`).value;
+    try {
+        await apiRequest(`${ORDER_API}/orders/${orderId}`, {
+            method: "PUT",
+            body: JSON.stringify({ status })
+        });
+        loadOwnerDashboard();
+    } catch (err) {
+        notify(err.message);
+    }
+}
 
 async function loadDeliveryDashboard() {
-    showView('delivery-section');
-    const container = document.getElementById('delivery-orders-container');
-    
-    try {
-        const resOrders = await fetch(`${ORDER_API}/orders`);
-        const allOrders = await resOrders.json();
-        
-        const deliveryOrders = allOrders.filter(o => 
-            o.status === 'out_for_delivery' || o.status === 'preparing'
-        );
+    if (!currentUser) return;
 
-        if (deliveryOrders.length === 0) {
-            return container.innerHTML = "<p>No orders currently available for delivery.</p>";
+    try {
+        const [ordersPayload, restaurantsPayload] = await Promise.all([
+            apiRequest(`${ORDER_API}/orders`),
+            apiRequest(`${RESTAURANT_API}/restaurants`)
+        ]);
+        const restaurants = restaurantsPayload.data || [];
+        const orders = ordersPayload.data || [];
+
+        const availableOrders = orders.filter((order) => order.status === "preparing" || (order.status === "out_for_delivery" && (!order.delivery_partner_id || order.delivery_partner_id === currentUser._id)));
+        const myOrders = orders.filter((order) => order.delivery_partner_id === currentUser._id && order.status !== "delivered" && order.status !== "cancelled");
+
+        renderStats("delivery-overview", [
+            { label: "Available", value: availableOrders.length },
+            { label: "Assigned", value: myOrders.length },
+            { label: "Completed", value: orders.filter((order) => order.delivery_partner_id === currentUser._id && order.status === "delivered").length },
+            { label: "Ready For Pickup", value: orders.filter((order) => order.status === "preparing").length }
+        ]);
+
+        const container = document.getElementById("delivery-orders-container");
+        if (!availableOrders.length && !myOrders.length) {
+            container.innerHTML = `<div class="card"><h3>No deliveries available</h3><p class="muted-note">Orders will appear here when restaurants move them to preparing or out for delivery.</p></div>`;
+            return showView("delivery-section");
         }
 
         container.innerHTML = `
-            <table class="dashboard-table">
-                <thead>
-                    <tr>
-                        <th>Address</th>
-                        <th>Status</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${deliveryOrders.map(order => `
-                        <tr>
-                            <td>${order.delivery_address?.street}, ${order.delivery_address?.city}</td>
-                            <td><span class="status-badge status-${order.status}">${order.status}</span></td>
-                            <td>
-                                <select id="status-delivery-${order._id}" style="width: auto; margin:0; padding: 4px;">
-                                    <option value="out_for_delivery" ${order.status === 'out_for_delivery' ? 'selected' : ''}>Pick Up</option>
-                                    <option value="delivered" ${order.status === 'delivered' ? 'selected' : ''}>Mark Delivered</option>
-                                </select>
-                                <button onclick="updateOrderStatus('${order._id}', 'delivery')" style="width: auto; padding: 4px 10px;">Update</button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+            <div class="profile-grid">
+                <div class="card">
+                    <h3>Available Orders</h3>
+                    ${availableOrders.length ? availableOrders.map((order) => {
+                        const restaurant = restaurants.find((item) => item._id === order.restaurant_id);
+                        return `
+                            <div class="cart-item">
+                                <p><b>${escapeHtml(restaurant?.restaurant_name || "Restaurant")}</b></p>
+                                <p class="meta-line">${escapeHtml(order.delivery_address?.street || "")}, ${escapeHtml(order.delivery_address?.city || "")}</p>
+                                <p class="meta-line">Status: ${escapeHtml(order.status)}</p>
+                                <button class="compact-btn" onclick="claimDelivery('${order._id}')">${order.delivery_partner_id === currentUser._id ? "Refresh" : "Claim Delivery"}</button>
+                            </div>
+                        `;
+                    }).join("") : `<p class="muted-note">No available orders.</p>`}
+                </div>
+                <div class="card">
+                    <h3>My Active Deliveries</h3>
+                    ${myOrders.length ? myOrders.map((order) => `
+                        <div class="cart-item">
+                            <p><b>Order ...${escapeHtml(order._id.slice(-6))}</b></p>
+                            <p class="meta-line">${escapeHtml(order.delivery_address?.street || "")}, ${escapeHtml(order.delivery_address?.city || "")}</p>
+                            <p class="meta-line">ETA: ${escapeHtml(formatDate(order.estimated_delivery_time))}</p>
+                            <button class="compact-btn btn-secondary" onclick="markDelivered('${order._id}')">Mark Delivered</button>
+                        </div>
+                    `).join("") : `<p class="muted-note">No active assignments.</p>`}
+                </div>
+            </div>
         `;
+
+        showView("delivery-section");
     } catch (err) {
-        console.error(err);
-        container.innerHTML = "<p>Error loading dashboard. Ensure backend services are running.</p>";
+        notify(err.message);
     }
 }
 
-// --- SHARED: Update Order Status API Call ---
-async function updateOrderStatus(orderId, roleContext) {
-    // FIX: Grab the namespaced ID based on which dashboard the user is clicking from
-    const newStatus = document.getElementById(`status-${roleContext}-${orderId}`).value;
-    
+async function claimDelivery(orderId) {
     try {
-        const res = await fetch(`${ORDER_API}/orders/${orderId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: newStatus })
+        await apiRequest(`${ORDER_API}/orders/${orderId}`, {
+            method: "PUT",
+            body: JSON.stringify({ status: "out_for_delivery", delivery_partner_id: currentUser._id })
         });
-        
-        if (res.ok) {
-            alert("Order status updated!");
-            if (roleContext === 'owner') loadOwnerDashboard();
-            if (roleContext === 'delivery') loadDeliveryDashboard();
-        } else {
-            alert("Failed to update status.");
-        }
+        loadDeliveryDashboard();
     } catch (err) {
-        console.error(err);
-        alert("Error connecting to Order Service.");
+        notify(err.message);
+    }
+}
+
+async function markDelivered(orderId) {
+    try {
+        await apiRequest(`${ORDER_API}/orders/${orderId}`, {
+            method: "PUT",
+            body: JSON.stringify({ status: "delivered" })
+        });
+        loadDeliveryDashboard();
+    } catch (err) {
+        notify(err.message);
     }
 }

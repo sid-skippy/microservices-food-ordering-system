@@ -3,111 +3,257 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IndiCrave - Food Delivery</title>
+    <title>IndiCrave</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="assets/logo.svg">
 </head>
 <body>
     <nav class="navbar">
-        <div class="logo">IndiCrave</div>
-        <div class="nav-links" id="nav-links">
-            </div>
+        <div>
+            <div class="logo">IndiCrave</div>
+            <p class="nav-tagline">Microservices food ordering platform</p>
+        </div>
+        <div class="nav-links" id="nav-links"></div>
     </nav>
 
     <main id="app-container">
         <section id="auth-section" class="view-section active">
-            <div class="card form-card">
-                <h2>Login to IndiCrave</h2>
-                <input type="email" id="login-email" placeholder="Enter your email">
-                <button onclick="handleLogin()">Login</button>
-                <p style="font-size: 0.9em; color: #666; margin-top: 10px;">
-                    Demo accounts:<br>
-                    Customer: john.doe@example.com<br>
-                    Owner: pizza.palace@restaurant.com<br>
-                    Delivery: delivery.raj@courier.com
-                </p>
-                <hr>
-                <h2>Or Register (Customer)</h2>
-                <input type="text" id="reg-name" placeholder="Full Name*">
-                <input type="email" id="reg-email" placeholder="Email*">
-                <input type="text" id="reg-phone" placeholder="Phone Number*">
-                <button onclick="handleRegister()" class="btn-secondary">Register</button>
+            <div class="hero-card auth-hero">
+                <div>
+                    <span class="eyebrow">Live Order Flow</span>
+                    <h1>Order, manage, dispatch, and review food in one place.</h1>
+                    <p>Customers can place and track orders, restaurant owners can manage menus and active orders, and delivery partners can claim and complete deliveries.</p>
+                </div>
+                <div class="hero-pill-group">
+                    <span class="hero-pill">Users</span>
+                    <span class="hero-pill">Restaurants</span>
+                    <span class="hero-pill">Orders</span>
+                    <span class="hero-pill">Payments</span>
+                </div>
+            </div>
+
+            <div class="auth-grid">
+                <div class="card form-card auth-card">
+                    <h2>Login</h2>
+                    <input type="email" id="login-email" placeholder="Email">
+                    <input type="password" id="login-password" placeholder="Password">
+                    <button onclick="handleLogin()">Login</button>
+                    <p class="muted-note">Use the seeded backend accounts if you already created them in MongoDB.</p>
+                </div>
+
+                <div class="card form-card auth-card">
+                    <h2>Register</h2>
+                    <input type="text" id="reg-name" placeholder="Full Name">
+                    <input type="email" id="reg-email" placeholder="Email">
+                    <input type="text" id="reg-phone" placeholder="Phone Number">
+                    <input type="password" id="reg-password" placeholder="Password">
+                    <button onclick="handleRegister()" class="btn-secondary">Create Account</button>
+                    <p class="muted-note">New signups default to the <b>customer</b> role.</p>
+                </div>
             </div>
         </section>
 
         <section id="profile-section" class="view-section">
-            <div class="card form-card">
-                <h2>Your Profile</h2>
-                <p>Please provide your delivery address to proceed.</p>
-                <input type="text" id="prof-street" placeholder="Street Address*">
-                <div style="display: flex; gap: 10px; width: 90%; margin: 0 auto; margin-bottom: 1rem;">
-                    <input type="text" id="prof-city" placeholder="City*" style="width: 33%; margin-bottom: 0;">
-                    <input type="text" id="prof-state" placeholder="State*" style="width: 33%; margin-bottom: 0;">
-                    <input type="text" id="prof-pincode" placeholder="Pincode*" style="width: 33%; margin-bottom: 0;">
+            <div class="section-head">
+                <div>
+                    <span class="eyebrow">Profile</span>
+                    <h2>Your Account</h2>
                 </div>
-                <button onclick="saveProfile()">Save Profile</button>
-                <button onclick="routeUserByRole()" class="btn-secondary" style="margin-top: 10px;" id="btn-cancel-profile">Cancel</button>
+            </div>
+
+            <div class="profile-grid">
+                <div class="card">
+                    <h3>Delivery Address</h3>
+                    <input type="text" id="prof-name" placeholder="Full Name">
+                    <input type="text" id="prof-phone" placeholder="Phone Number">
+                    <input type="text" id="prof-street" placeholder="Street Address">
+                    <div class="inline-grid three-up">
+                        <input type="text" id="prof-city" placeholder="City">
+                        <input type="text" id="prof-state" placeholder="State">
+                        <input type="text" id="prof-pincode" placeholder="Pincode">
+                    </div>
+                    <button onclick="saveProfile()">Save Profile</button>
+                    <button onclick="routeUserByRole()" class="btn-secondary" id="btn-cancel-profile">Cancel</button>
+                </div>
+
+                <div class="card">
+                    <h3>Change Password</h3>
+                    <input type="password" id="pwd-current" placeholder="Current Password">
+                    <input type="password" id="pwd-new" placeholder="New Password">
+                    <button onclick="changePassword()">Update Password</button>
+                    <p class="muted-note">Password updates use the backend password route and verify your current password first.</p>
+                </div>
             </div>
         </section>
 
         <section id="restaurants-section" class="view-section">
-            <h2>Available Restaurants</h2>
+            <div class="section-head">
+                <div>
+                    <span class="eyebrow">Discover</span>
+                    <h2>Restaurants</h2>
+                </div>
+                <button class="btn-secondary compact-btn" onclick="loadMyOrders()">My Orders</button>
+            </div>
+
+            <div id="customer-summary" class="stats-strip"></div>
+
+            <div class="card filter-card">
+                <div class="filter-grid">
+                    <input type="text" id="restaurant-search" placeholder="Search restaurants, cuisines, or city">
+                    <input type="text" id="restaurant-cuisine" placeholder="Cuisine filter">
+                    <input type="text" id="restaurant-city" placeholder="City filter">
+                    <select id="restaurant-sort">
+                        <option value="">Newest</option>
+                        <option value="rating">Top Rated</option>
+                        <option value="name">Name</option>
+                    </select>
+                    <select id="restaurant-open">
+                        <option value="">Any Status</option>
+                        <option value="true">Open Now</option>
+                        <option value="false">Closed</option>
+                    </select>
+                    <button class="compact-btn" onclick="loadRestaurants()">Apply Filters</button>
+                </div>
+            </div>
+
             <div class="grid" id="restaurants-grid"></div>
         </section>
 
         <section id="menu-section" class="view-section">
-            <button onclick="showView('restaurants-section')" class="btn-back">← Back to Restaurants</button>
-            <h2 id="current-restaurant-name">Menu</h2>
-            <div class="menu-container">
-                <div class="grid" id="menu-grid"></div>
-                <div class="cart-sidebar">
-                    <h3>Your Cart</h3>
-                    <div id="cart-items"></div>
-                    <div class="cart-total">Total: ₹<span id="cart-total-amount">0.00</span></div>
-                    <button onclick="processCheckout()" id="checkout-btn" disabled>Proceed to Pay</button>
+            <button onclick="showView('restaurants-section')" class="btn-back">Back to restaurants</button>
+
+            <div class="section-head">
+                <div>
+                    <span class="eyebrow">Menu</span>
+                    <h2 id="current-restaurant-name">Menu</h2>
+                    <p id="restaurant-meta" class="muted-note"></p>
                 </div>
+            </div>
+
+            <div class="card filter-card">
+                <div class="filter-grid">
+                    <input type="text" id="menu-search" placeholder="Search menu items">
+                    <select id="menu-category">
+                        <option value="">All Categories</option>
+                        <option value="appetizer">Appetizer</option>
+                        <option value="main_course">Main Course</option>
+                        <option value="dessert">Dessert</option>
+                        <option value="beverage">Beverage</option>
+                        <option value="combo">Combo</option>
+                    </select>
+                    <select id="menu-veg">
+                        <option value="">All Items</option>
+                        <option value="veg">Vegetarian</option>
+                        <option value="vegan">Vegan</option>
+                        <option value="available">Available Only</option>
+                    </select>
+                    <button class="compact-btn" onclick="renderMenuItems()">Filter Menu</button>
+                </div>
+            </div>
+
+            <div class="menu-layout">
+                <div class="grid" id="menu-grid"></div>
+
+                <aside class="cart-sidebar">
+                    <div class="cart-head">
+                        <h3>Your Cart</h3>
+                        <button class="ghost-btn" onclick="clearCart()">Clear</button>
+                    </div>
+                    <div id="cart-items"></div>
+
+                    <div class="cart-controls">
+                        <input type="text" id="promo-code" placeholder="Promo code (SAVE10 or FREEDEL)">
+                        <button class="compact-btn" onclick="applyPromoCode()">Apply Promo</button>
+                    </div>
+
+                    <select id="payment-method">
+                        <option value="UPI">UPI</option>
+                        <option value="wallet">Wallet</option>
+                        <option value="COD">Cash on Delivery</option>
+                        <option value="credit_card">Credit Card</option>
+                        <option value="debit_card">Debit Card</option>
+                        <option value="net_banking">Net Banking</option>
+                    </select>
+
+                    <select id="payment-gateway">
+                        <option value="manual">Manual</option>
+                        <option value="razorpay">Razorpay</option>
+                        <option value="paytm">Paytm</option>
+                        <option value="phonepe">PhonePe</option>
+                        <option value="gpay">GPay</option>
+                    </select>
+
+                    <textarea id="order-note" rows="3" placeholder="Overall order note"></textarea>
+
+                    <div class="price-breakdown" id="cart-breakdown"></div>
+                    <button onclick="processCheckout()" id="checkout-btn" disabled>Place Order</button>
+                </aside>
             </div>
         </section>
 
         <section id="my-orders-section" class="view-section">
-            <h2>My Past Orders</h2>
+            <div class="section-head">
+                <div>
+                    <span class="eyebrow">Orders</span>
+                    <h2>My Orders</h2>
+                </div>
+                <button class="btn-secondary compact-btn" onclick="loadRestaurants()">Back to Home</button>
+            </div>
+
+            <div id="order-stats" class="stats-strip"></div>
             <div id="my-orders-container" class="grid"></div>
-        </section>
-        
-        <section id="success-section" class="view-section text-center">
-            <h2>🎉 Order Placed Successfully!</h2>
-            <p>Your payment has been recorded.</p>
-            <button onclick="routeUserByRole()" class="btn-secondary">Back to Dashboard</button>
         </section>
 
         <section id="owner-section" class="view-section">
-            <h2>Restaurant Owner Dashboard</h2>
-            <div class="card">
-                <h3>Incoming Orders</h3>
-                <div id="owner-orders-container">Loading orders...</div>
+            <div class="section-head">
+                <div>
+                    <span class="eyebrow">Owner Console</span>
+                    <h2>Restaurant Dashboard</h2>
+                </div>
             </div>
+
+            <div id="owner-overview" class="stats-strip"></div>
+            <div id="owner-restaurants-panel"></div>
+            <div id="owner-orders-container" class="card"></div>
         </section>
 
         <section id="delivery-section" class="view-section">
-            <h2>Delivery Partner Dashboard</h2>
-            <div class="card">
-                <h3>Active Deliveries</h3>
-                <div id="delivery-orders-container">Loading deliveries...</div>
+            <div class="section-head">
+                <div>
+                    <span class="eyebrow">Delivery</span>
+                    <h2>Dispatch Dashboard</h2>
+                </div>
             </div>
+
+            <div id="delivery-overview" class="stats-strip"></div>
+            <div id="delivery-orders-container"></div>
         </section>
 
+        <section id="success-section" class="view-section">
+            <div class="card form-card text-center">
+                <h2>Order placed</h2>
+                <p id="success-message">Your payment has been processed and the order is now in the queue.</p>
+                <button onclick="loadMyOrders()">Track Order</button>
+                <button onclick="loadRestaurants()" class="btn-secondary">Continue Ordering</button>
+            </div>
+        </section>
     </main>
 
-    <div id="review-modal" class="modal" style="display: none;">
+    <div id="review-modal" class="modal hidden">
         <div class="modal-content card">
-            <h3 style="margin-top: 0;">Leave a Review</h3>
+            <div class="modal-head">
+                <h3 id="review-modal-title">Leave a Review</h3>
+                <button class="ghost-btn" onclick="closeReviewModal()">Close</button>
+            </div>
+            <input type="hidden" id="review-id">
             <input type="hidden" id="review-order-id">
             <input type="hidden" id="review-restaurant-id">
-            <label style="font-weight: bold; display: block; margin-bottom: 5px;">Rating (1-5):</label>
+            <label class="form-label" for="review-rating">Rating</label>
             <input type="number" id="review-rating" min="1" max="5" value="5">
-            <label style="font-weight: bold; display: block; margin-bottom: 5px;">Comment:</label>
-            <textarea id="review-comment" rows="3" placeholder="Tell us how the food was!"></textarea>
+            <label class="form-label" for="review-comment">Comment</label>
+            <textarea id="review-comment" rows="4" placeholder="Share your experience"></textarea>
             <button onclick="submitReview()">Submit Review</button>
-            <button onclick="closeReviewModal()" class="btn-secondary" style="margin-top:10px;">Cancel</button>
+            <button id="review-delete-btn" class="btn-danger hidden" onclick="deleteReview()">Delete Review</button>
         </div>
     </div>
 
