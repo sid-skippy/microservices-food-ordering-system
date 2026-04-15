@@ -144,13 +144,10 @@ Dependency source: [backend/package.json](backend/package.json)
 - expected vs actual behavior
 - relevant service logs
 
-## Maintainers and Contributions
-
-### Maintainer
+## Contributors
 
 - Kushaagra Sood
-
-### Contributing
+- Siddhartha Gupta
 
 Contributions are welcome through pull requests.
 
