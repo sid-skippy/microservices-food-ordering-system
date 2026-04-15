@@ -148,6 +148,7 @@ Dependency source: [backend/package.json](backend/package.json)
 
 - Kushaagra Sood
 - Siddhartha Gupta
+- Abhishek Paul
 
 Contributions are welcome through pull requests.
 
