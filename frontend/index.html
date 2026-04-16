@@ -6,6 +6,175 @@
     <title>IndiCrave — Food Ordering Platform</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="assets/logo.svg">
+    <!-- Fonts: Playfair Display (hero/headings) · Syne (brand) · DM Sans (UI) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    <style>
+        /* ── Font overrides ──────────────────────────────── */
+        h1, h2, h3,
+        .hero-card h1,
+        .hero-card h2 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            line-height: 1.12;
+        }
+        h2, h3 { font-weight: 700; }
+
+        .eyebrow, .nav-tagline, label, .form-label,
+        .muted-note, .tag, .hero-pill, button,
+        select, input, textarea, p, .stats-strip {
+            font-family: 'DM Sans', system-ui, sans-serif;
+        }
+
+        /* Navbar brand */
+        .logo {
+            font-family: 'Syne', sans-serif !important;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            text-shadow: 0 0 22px rgba(200,80,40,0.38), 0 0 48px rgba(200,80,40,0.14);
+        }
+
+        /* Section headings */
+        .section-head h2 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-weight: 700;
+            letter-spacing: -0.015em;
+            display: inline-block;
+            position: relative;
+        }
+        .section-head h2::after {
+            content: '';
+            position: absolute;
+            left: 0; bottom: -4px;
+            width: 0; height: 2px;
+            background: var(--accent, #c85028);
+            border-radius: 2px;
+            animation: drawLine 0.65s cubic-bezier(.4,0,.2,1) forwards 0.1s;
+        }
+        @keyframes drawLine {
+            to { width: 100%; }
+        }
+
+        /* Hero card italic h1 */
+        .hero-card h1 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-style: italic;
+        }
+
+        /* ── Hero card ambient glow ──────────────────────── */
+        .auth-hero {
+            position: relative;
+            overflow: hidden;
+        }
+        .auth-hero::before {
+            content: '';
+            position: absolute;
+            top: -70px; right: -70px;
+            width: 340px; height: 340px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(200,80,40,0.22) 0%, transparent 70%);
+            animation: pulseGlow 4s ease-in-out infinite;
+            pointer-events: none;
+        }
+        .auth-hero::after {
+            content: '';
+            position: absolute;
+            bottom: -50px; left: 28%;
+            width: 220px; height: 220px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,165,50,0.14) 0%, transparent 70%);
+            animation: pulseGlow 5.5s ease-in-out infinite reverse;
+            pointer-events: none;
+        }
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 0.65; transform: scale(1); }
+            50%       { opacity: 1;   transform: scale(1.14); }
+        }
+
+        /* ── Eyebrow shimmer sweep ───────────────────────── */
+        .eyebrow {
+            position: relative;
+            overflow: hidden;
+        }
+        .eyebrow::after {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 55%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+            animation: shimmer 3.8s ease-in-out infinite;
+        }
+        @keyframes shimmer {
+            0%   { left: -80%; }
+            55%  { left: 130%; }
+            100% { left: 130%; }
+        }
+
+        /* ── Hero pill float ─────────────────────────────── */
+        .hero-pill { animation: floatPill 3s ease-in-out infinite; }
+        .hero-pill:nth-child(2) { animation-delay: 0.35s; }
+        .hero-pill:nth-child(3) { animation-delay: 0.7s;  }
+        .hero-pill:nth-child(4) { animation-delay: 1.05s; }
+        .hero-pill:nth-child(5) { animation-delay: 1.4s;  }
+        @keyframes floatPill {
+            0%, 100% { transform: translateY(0px); }
+            50%       { transform: translateY(-5px); }
+        }
+
+        /* ── Card entrance fade-up ───────────────────────── */
+        .card {
+            animation: fadeUp 0.45s cubic-bezier(.4,0,.2,1) both;
+        }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to   { opacity: 1; transform: translateY(0);    }
+        }
+        .auth-grid   .card:nth-child(2),
+        .profile-grid .card:nth-child(2),
+        .grid        .card:nth-child(2) { animation-delay: 0.07s; }
+        .auth-grid   .card:nth-child(3),
+        .profile-grid .card:nth-child(3),
+        .grid        .card:nth-child(3) { animation-delay: 0.14s; }
+        .grid .card:nth-child(4) { animation-delay: 0.20s; }
+        .grid .card:nth-child(5) { animation-delay: 0.26s; }
+        .grid .card:nth-child(6) { animation-delay: 0.32s; }
+
+        /* ── Button glow on hover ────────────────────────── */
+        button:not(.ghost-btn):not(.btn-back):not(.btn-danger):hover {
+            box-shadow: 0 0 0 3px rgba(200,80,40,0.16), 0 6px 22px rgba(200,80,40,0.24);
+            transform: translateY(-1px);
+            transition: box-shadow 0.22s ease, transform 0.15s ease;
+        }
+
+        /* ── Stat value pop-in ───────────────────────────── */
+        .stat-value {
+            animation: popIn 0.4s cubic-bezier(.34,1.56,.64,1) both;
+        }
+        @keyframes popIn {
+            from { opacity: 0; transform: scale(0.65); }
+            to   { opacity: 1; transform: scale(1);    }
+        }
+
+        /* ── Success emoji bounce ────────────────────────── */
+        #success-section [style*="font-size:3.5rem"] {
+            display: inline-block;
+            animation: bounce 0.75s cubic-bezier(.34,1.56,.64,1) both 0.1s;
+        }
+        @keyframes bounce {
+            from { opacity: 0; transform: scale(0.2) rotate(-20deg); }
+            to   { opacity: 1; transform: scale(1) rotate(0deg);     }
+        }
+
+        /* ── Restaurant card hover glow ──────────────────── */
+        #restaurants-grid .card:hover,
+        #menu-grid .card:hover {
+            box-shadow: 0 0 0 2px rgba(200,80,40,0.18), 0 8px 28px rgba(200,80,40,0.13);
+            transform: translateY(-3px);
+            transition: box-shadow 0.2s ease, transform 0.18s ease;
+        }
+    </style>
 </head>
 <body>
 
@@ -456,6 +625,21 @@
             <div class="button-row" style="margin-top:0.5rem">
                 <button onclick="submitReview()" style="flex:1">Submit Review</button>
                 <button id="review-delete-btn" class="btn-danger hidden" onclick="deleteReview()" style="flex:1">Delete Review</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notification container -->
+    <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- Custom prompt / confirm modal -->
+    <div id="prompt-modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="prompt-modal-title">
+        <div id="prompt-modal">
+            <h3 id="prompt-modal-title">Confirm</h3>
+            <div id="prompt-modal-body"></div>
+            <div id="prompt-modal-actions">
+                <button id="prompt-modal-cancel" class="compact-btn ghost-btn">Cancel</button>
+                <button id="prompt-modal-confirm" class="compact-btn">Confirm</button>
             </div>
         </div>
     </div>

@@ -868,3 +868,172 @@ button:disabled { opacity: 0.48; cursor: not-allowed; }
     .three-up { grid-template-columns: 1fr; }
     .stats-strip { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── Toast Notifications ────────────────────────────────────────────────── */
+#toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    pointer-events: none;
+    max-width: 360px;
+    width: calc(100vw - 3rem);
+}
+
+.toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--r-md);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-lg);
+    pointer-events: all;
+    opacity: 0;
+    transform: translateX(24px) scale(0.97);
+    transition: opacity 0.28s ease, transform 0.28s ease;
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+    line-height: 1.45;
+}
+
+.toast.toast-visible {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+}
+
+.toast-icon {
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--r-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-top: 0.05rem;
+}
+
+.toast-message {
+    flex: 1;
+    color: var(--ink);
+}
+
+.toast-close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    margin: 0;
+    width: auto;
+    border-radius: 0;
+    transition: color 0.15s;
+}
+.toast-close:hover { color: var(--ink); background: none; }
+
+/* Toast type variants */
+.toast-success {
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--surface) 92%, var(--accent));
+}
+.toast-success .toast-icon {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+.toast-error {
+    border-left: 3px solid var(--danger);
+    background: color-mix(in srgb, var(--surface) 92%, var(--danger));
+}
+.toast-error .toast-icon {
+    background: rgba(192, 41, 45, 0.10);
+    color: var(--danger);
+}
+
+.toast-info {
+    border-left: 3px solid var(--brand);
+    background: color-mix(in srgb, var(--surface) 92%, var(--brand));
+}
+.toast-info .toast-icon {
+    background: var(--brand-light);
+    color: var(--brand);
+}
+
+.toast-warning {
+    border-left: 3px solid var(--gold);
+    background: color-mix(in srgb, var(--surface) 92%, var(--gold));
+}
+.toast-warning .toast-icon {
+    background: var(--gold-light);
+    color: var(--gold);
+}
+
+/* ── Prompt / Confirm Modal ─────────────────────────────────────────────── */
+#prompt-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: rgba(28, 20, 16, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    transition: opacity 0.2s ease;
+}
+
+#prompt-modal-overlay.hidden {
+    display: none;
+}
+
+#prompt-modal {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-xl);
+    padding: 1.75rem;
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+}
+
+#prompt-modal-title {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0;
+}
+
+#prompt-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+#prompt-modal-body .form-label {
+    margin-bottom: 0.25rem;
+}
+
+#prompt-modal-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: flex-end;
+    margin-top: 0.25rem;
+}
+
+#prompt-modal-actions .compact-btn {
+    min-width: 100px;
+}

@@ -59,8 +59,113 @@ async function apiRequest(url, options = {}) {
     return payload;
 }
 
-function notify(message) {
-    alert(message);
+// ── Toast notification system ──────────────────────────────────────────────
+function notify(message, type = "info") {
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+
+    const isError = /error|fail|invalid|required|not found|cannot|unable|wrong|incorrect/i.test(message);
+    const isSuccess = /success|saved|placed|updated|created|submitted|deleted|applied|cancelled|delivered|password|registered|added/i.test(message);
+    const resolvedType = type !== "info" ? type : isError ? "error" : isSuccess ? "success" : "info";
+
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${resolvedType}`;
+
+    const icons = { success: "✓", error: "✕", info: "ℹ", warning: "⚠" };
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[resolvedType] || icons.info}</span>
+        <span class="toast-message">${escapeHtml(message)}</span>
+        <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+    `;
+
+    container.appendChild(toast);
+
+    // Trigger entrance animation
+    requestAnimationFrame(() => toast.classList.add("toast-visible"));
+
+    // Auto-dismiss after 4s
+    setTimeout(() => {
+        toast.classList.remove("toast-visible");
+        toast.addEventListener("transitionend", () => toast.remove(), { once: true });
+    }, 4000);
+}
+
+// ── Custom prompt / confirm modal ──────────────────────────────────────────
+function showPrompt(options) {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById("prompt-modal-overlay");
+        const title = document.getElementById("prompt-modal-title");
+        const body = document.getElementById("prompt-modal-body");
+        const confirmBtn = document.getElementById("prompt-modal-confirm");
+        const cancelBtn = document.getElementById("prompt-modal-cancel");
+
+        title.textContent = options.title || "Confirm";
+        body.innerHTML = "";
+
+        if (options.message) {
+            const p = document.createElement("p");
+            p.className = "muted-note";
+            p.textContent = options.message;
+            body.appendChild(p);
+        }
+
+        let inputEl = null;
+        if (options.inputLabel) {
+            const label = document.createElement("label");
+            label.className = "form-label";
+            label.textContent = options.inputLabel;
+            inputEl = document.createElement("input");
+            inputEl.type = "text";
+            inputEl.value = options.inputDefault || "";
+            inputEl.placeholder = options.inputPlaceholder || "";
+            inputEl.style.marginTop = "0.5rem";
+            body.appendChild(label);
+            body.appendChild(inputEl);
+        }
+
+        let selectEl = null;
+        if (options.selectLabel && options.selectOptions) {
+            const label = document.createElement("label");
+            label.className = "form-label";
+            label.textContent = options.selectLabel;
+            selectEl = document.createElement("select");
+            options.selectOptions.forEach(({ value, label: text }) => {
+                const opt = document.createElement("option");
+                opt.value = value;
+                opt.textContent = text;
+                if (value === options.selectDefault) opt.selected = true;
+                selectEl.appendChild(opt);
+            });
+            selectEl.style.marginTop = "0.5rem";
+            body.appendChild(label);
+            body.appendChild(selectEl);
+        }
+
+        confirmBtn.textContent = options.confirmLabel || "Confirm";
+        confirmBtn.className = `compact-btn ${options.danger ? "btn-danger" : ""}`;
+        cancelBtn.textContent = options.cancelLabel || "Cancel";
+
+        overlay.classList.remove("hidden");
+        if (inputEl) setTimeout(() => inputEl.focus(), 50);
+
+        function cleanup() {
+            overlay.classList.add("hidden");
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+        }
+
+        confirmBtn.onclick = () => {
+            cleanup();
+            if (inputEl) resolve(inputEl.value.trim());
+            else if (selectEl) resolve(selectEl.value);
+            else resolve(true);
+        };
+
+        cancelBtn.onclick = () => {
+            cleanup();
+            resolve(null);
+        };
+    });
 }
 
 function showView(viewId) {
@@ -213,6 +318,7 @@ async function handleRegister() {
     const email = document.getElementById("reg-email").value.trim();
     const phone = document.getElementById("reg-phone").value.trim();
     const password = document.getElementById("reg-password").value;
+    const role_name = document.getElementById("reg-role")?.value || "customer";
 
     if (!full_name || !email || !phone || !password) {
         return notify("Name, email, phone, and password are required.");
@@ -221,12 +327,18 @@ async function handleRegister() {
     try {
         await apiRequest(`${USER_API}/users/register`, {
             method: "POST",
-            body: JSON.stringify({ full_name, email, phone, password, role_name: "customer" })
+            body: JSON.stringify({ full_name, email, phone, password, role_name })
         });
-        notify("Registration successful. You can log in now.");
+        const roleLabels = {
+            customer: "Customer",
+            restaurant_owner: "Restaurant Owner",
+            delivery_partner: "Delivery Partner"
+        };
+        notify(`Registered as ${roleLabels[role_name] || role_name}. You can log in now.`);
         ["reg-name", "reg-email", "reg-phone", "reg-password"].forEach((id) => {
             document.getElementById(id).value = "";
         });
+        document.getElementById("reg-role").value = "customer";
     } catch (err) {
         notify(err.message);
     }
@@ -957,7 +1069,16 @@ async function fetchPaymentForOrder(orderId) {
 }
 
 async function cancelOrder(orderId) {
-    const reason = prompt("Cancellation reason:", "Changed my mind");
+    const reason = await showPrompt({
+        title: "Cancel Order",
+        message: "Are you sure you want to cancel this order?",
+        inputLabel: "Reason for cancellation",
+        inputDefault: "Changed my mind",
+        inputPlaceholder: "Enter reason…",
+        confirmLabel: "Cancel Order",
+        cancelLabel: "Keep Order",
+        danger: true
+    });
     if (reason === null) return;
 
     try {
@@ -988,7 +1109,22 @@ async function retryPayment(orderId) {
             fetchPaymentForOrder(orderId)
         ]);
 
-        const payment_method = prompt("Payment method for retry (UPI, wallet, COD, credit_card, debit_card, net_banking):", existingPayment?.payment_method || "UPI");
+        const payment_method = await showPrompt({
+            title: "Retry Payment",
+            message: "Choose a payment method to retry:",
+            selectLabel: "Payment Method",
+            selectOptions: [
+                { value: "UPI", label: "UPI" },
+                { value: "wallet", label: "Wallet" },
+                { value: "COD", label: "Cash on Delivery" },
+                { value: "credit_card", label: "Credit Card" },
+                { value: "debit_card", label: "Debit Card" },
+                { value: "net_banking", label: "Net Banking" }
+            ],
+            selectDefault: existingPayment?.payment_method || "UPI",
+            confirmLabel: "Retry Payment",
+            cancelLabel: "Cancel"
+        });
         if (!payment_method) return;
 
         const paymentPayload = await apiRequest(`${PAYMENT_API}/payments/process`, {
