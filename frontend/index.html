@@ -228,6 +228,12 @@
                     <input type="text" id="reg-phone" placeholder="+91 98765 43210" autocomplete="tel">
                     <label class="form-label" for="reg-password">Password</label>
                     <input type="password" id="reg-password" placeholder="Create a strong password" autocomplete="new-password">
+                    <label class="form-label" for="reg-role" style="margin-top:0.75rem">Register As</label>
+                    <select id="reg-role">
+                        <option value="customer">🛒 Customer — Browse &amp; order food</option>
+                        <option value="restaurant_owner">🍽️ Restaurant Owner — Manage your restaurant</option>
+                        <option value="delivery_partner">🚴 Delivery Partner — Deliver orders</option>
+                    </select>
                     <button onclick="handleRegister()" class="btn-secondary" style="margin-top:0.5rem">Create Account →</button>
                 </div>
             </div>
